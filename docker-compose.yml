@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  guacd:
+    image: guacamole/guacd
+    container_name: umt_guacd
+    restart: always
+    env_file:
+      - .env
+    expose:
+      - "4822"
+    networks:
+      - vdi_net
+    # [THÊM DÒNG NÀY] Tối ưu Java Heap và Buffer cho guacd
+    environment:
+      - LOG_LEVEL=info
+    deploy:
+      resources:
+        limits:
+          memory: 1G  # Cấp hẳn 1GB Ram cho nó xử lý ảnh
+
+  # 2. Database (PostgreSQL)
+  postgres:
+    image: postgres:15-alpine
+    container_name: umt_db
+    restart: always
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - vdi_net
+
+  # 3. Backend API
+  backend:
+    build: ./backend
+    container_name: umt_backend
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - guacd
+    networks:
+      - vdi_net
+
+  # 4. Frontend Client
+  frontend:
+    build: ./frontend
+    container_name: umt_frontend
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "80:3000"
+    depends_on:
+      - backend
+    networks:
+      - vdi_net
+
+# --- CẤU HÌNH MẠNG (FIX LỖI DISCONNECT) ---
+networks:
+  vdi_net:
+    driver: bridge
+    driver_opts:
+      # Quan trọng: Giảm MTU xuống 1350 để gói tin RDP lớn
+      # không bị Docker drop (nguyên nhân gây màn hình đen/disconnect)
+      com.docker.network.driver.mtu: "1350"

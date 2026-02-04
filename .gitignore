@@ -1,0 +1,52 @@
+# --- Dependencies (QUAN TRỌNG: Không bao giờ commit cái này) ---
+node_modules/
+*/node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# --- Environment Variables (BẢO MẬT: Chứa mật khẩu, token) ---
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# --- Next.js (Frontend Build) ---
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+
+# --- NestJS (Backend Build) ---
+backend/dist/
+backend/coverage/
+
+# --- IDE / Editor System Files ---
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Docker & Database Data ---
+# Nếu bạn map volume data ra ngoài thì phải ignore nó
+postgres_data/
+mysql_data/
+mongo_data/
+
+# --- Testing ---
+coverage/
+cypress/videos
+cypress/screenshots
+
+# --- Vercel ---
+.vercel
+
+data/
