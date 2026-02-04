@@ -13,7 +13,7 @@ services:
       - vdi_net
     # [THÊM DÒNG NÀY] Tối ưu Java Heap và Buffer cho guacd
     environment:
-      - LOG_LEVEL=info
+      - LOG_LEVEL=debug
     deploy:
       resources:
         limits:

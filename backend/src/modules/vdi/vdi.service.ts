@@ -32,39 +32,45 @@ export class VdiService {
 
   // --- HÀM TẠO TOKEN (PHIÊN BẢN VNC - NO PASSWORD) ---
 generateGuacamoleToken(vm: Vm): string {
-  const connectionSettings = {
-    connection: {
-      type: 'rdp',
-      settings: {
-        hostname: vm.ip,
-        port: String(vm.port),
-
-        // Nếu máy bắt NLA thì cần username/password (nếu bỏ có thể fail)
-        // Manual: NLA cần credentials hoặc prompting :contentReference[oaicite:7]{index=7}
-        username: vm.username,
-        password: vm.password,
-
-        security: 'any',
-        'ignore-cert': 'true',
-        timeout: '60', // seconds :contentReference[oaicite:8]{index=8}
-
-        // Performance/stability
-        'disable-gfx': 'true',                // :contentReference[oaicite:9]{index=9}
-        'color-depth': '16',                  // :contentReference[oaicite:10]{index=10}
-        'disable-bitmap-caching': 'true',     // :contentReference[oaicite:11]{index=11}
-        'disable-offscreen-caching': 'true',  // :contentReference[oaicite:12]{index=12}
-        'disable-glyph-caching': 'true',      // :contentReference[oaicite:13]{index=13}
-        'disable-audio': 'true',              // :contentReference[oaicite:14]{index=14}
-
-        'resize-method': 'display-update',    // :contentReference[oaicite:15]{index=15}
-        dpi: '96',
-        'server-layout': 'en-us-qwerty',
-
-        // Các flag kiểu enable-wallpaper/enable-theming... mặc định đã FALSE :contentReference[oaicite:16]{index=16}
-        // => KHÔNG cần set "disable-wallpaper" gì cả.
+    const connectionSettings = {
+      connection: {
+        type: 'rdp',
+        settings: {
+          hostname: vm.ip,
+          port: String(vm.port),
+          username: vm.username,
+          password: vm.password,
+          
+          // --- [FIX] BẢO MẬT & MẠNG ---
+          security: 'any',
+          'ignore-cert': 'true',
+          'enable-keep-alive': 'true',       // [QUAN TRỌNG] Giữ kết nối
+          'keep-alive-interval': '30',       // Ping mỗi 30s
+          
+          // --- HIỆU NĂNG ---
+          'disable-wallpaper': 'true',
+          'disable-theming': 'true',
+          'disable-menu-animations': 'true',
+          'disable-aero': 'true',
+          
+          // Bật cache để đỡ tốn băng thông
+          'disable-bitmap-caching': 'true',
+          'disable-offscreen-caching': 'true',
+          'disable-glyph-caching': 'true',
+          
+          'disable-audio': 'true',          
+          'color-depth': '32',        
+          
+          'enable-font-smoothing': 'false',
+          'disable-full-window-drag': 'true',
+          
+          'force-lossless': 'true',
+          'resize-method': 'display-update', // Resize mượt mà
+          dpi: '96',
+          'server-layout': 'en-us-qwerty',
+        },
       },
-    },
-  };
+    };
 
     // Mã hóa Token (Giữ nguyên logic cũ)
     const keyString = 'MySuperSecretKeyForEncryption123';
