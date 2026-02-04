@@ -2,55 +2,99 @@
 
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { Server } from 'socket.io';
-import GuacamoleLite from 'guacamole-lite';
+
+// Dùng require để tránh lỗi constructor
+const GuacamoleLite = require('guacamole-lite');
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api');
   app.enableCors({
-    origin: true,
+    origin: '*', 
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
 
   const server = app.getHttpServer();
-  await app.listen(3000);
-
-  // Socket.io config (Không ảnh hưởng trực tiếp đến Guacamole nhưng cứ giữ nguyên)
-  const io = new Server(server, { 
-    cors: { origin: '*' },
-    pingTimeout: 60000,
-    pingInterval: 25000,
-    maxHttpBufferSize: 1e8 
-  });
 
   const guacdOptions = {
     host: 'umt_guacd',
     port: 4822,
   };
 
+  const guacCrypt = {
+    cypher: 'AES-256-CBC',
+    key: process.env.GUAC_CRYPT_KEY || 'MySuperSecretKeyForEncryption123',
+  };
+
   const clientOptions = {
-    crypt: {
-      cypher: 'AES-256-CBC',
-      key: 'MySuperSecretKeyForEncryption123' 
-    },
+    // [BẮT BUỘC] Key phải trùng với nơi tạo token (VdiService)
+    crypt: guacCrypt,
+    
+    // [FIX QUAN TRỌNG]: XÓA BỎ 'allowedUnencryptedConnectionSettings'
+    // Để tránh lỗi "includes is not a function" gây sập kết nối.
+    
     log: {
-        level: 'ERR'
+      level: 'DEBUG'
     },
-    // [QUAN TRỌNG - BẮT BUỘC PHẢI CÓ DÒNG NÀY ĐỂ FIX DISCONNECT]
-    // Tăng thời gian chờ từ 10s (mặc định) lên 30s
     maxInactivityTime: 30000 
   };
 
+  const guacCallbacks = {
+    processConnectionSettings: function (settings, callback) {
+      // settings: { connection: { ... }, ... }
+      if (!settings || !settings.connection) {
+        return callback(new Error('Missing connection settings'));
+      }
+
+      try {
+        const connection = settings.connection;
+        const targetSettings = connection.settings ? connection.settings : connection;
+
+        const normalizeDimension = (value: unknown, multiple = 4, min = 100) => {
+          const n = Number(value);
+          if (!Number.isFinite(n)) return undefined;
+          const intVal = Math.max(min, Math.floor(n));
+          return intVal - (intVal % multiple);
+        };
+
+        const width = normalizeDimension(settings.width ?? targetSettings.width, 4, 100);
+        if (width) targetSettings.width = width;
+
+        const height = normalizeDimension(settings.height ?? targetSettings.height, 4, 100);
+        if (height) targetSettings.height = height;
+
+        const dpiRaw = Number(settings.dpi ?? targetSettings.dpi);
+        if (Number.isFinite(dpiRaw) && dpiRaw > 0) {
+          targetSettings.dpi = Math.round(dpiRaw);
+        }
+
+        const host =
+          targetSettings.hostname ||
+          connection.hostname ||
+          connection.settings?.hostname;
+
+        console.log('[Guac] ✅ Token accepted for Host:', host);
+
+        callback(null, settings);
+      } catch (err) {
+        console.error('[Guac] ❌ Token Error:', err.message);
+        callback(new Error('Token validation failed'));
+      }
+    }
+  };
+
+  // Khởi tạo Guacamole Lite
   // @ts-ignore
   new GuacamoleLite(
     { server, path: '/guaclite' }, 
     guacdOptions, 
-    clientOptions
+    clientOptions,
+    guacCallbacks
   );
-  
-  console.log('VDI Portal Backend is running on port 3000');
+
+  await app.listen(3000);
+  console.log('VDI Backend running on port 3000');
 }
 bootstrap();

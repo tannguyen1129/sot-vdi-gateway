@@ -3,6 +3,8 @@ version: '3.8'
 services:
   guacd:
     image: guacamole/guacd
+    environment:
+      - LOG_LEVEL=info
     container_name: umt_guacd
     restart: always
     env_file:
@@ -12,8 +14,6 @@ services:
     networks:
       - vdi_net
     # [THÊM DÒNG NÀY] Tối ưu Java Heap và Buffer cho guacd
-    environment:
-      - LOG_LEVEL=debug
     deploy:
       resources:
         limits:

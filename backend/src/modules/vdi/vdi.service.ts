@@ -1,3 +1,5 @@
+// backend/src/modules/vdi/vdi.service.ts
+
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -6,6 +8,9 @@ import * as crypto from 'crypto';
 
 @Injectable()
 export class VdiService {
+  private readonly guacCypher = 'AES-256-CBC';
+  private readonly guacKey = process.env.GUAC_CRYPT_KEY || 'MySuperSecretKeyForEncryption123';
+
   constructor(
     @InjectRepository(Vm)
     private vmRepo: Repository<Vm>,
@@ -15,13 +20,12 @@ export class VdiService {
     let vm = await this.vmRepo.findOne({ where: { allocatedToUserId: userId } });
     if (vm) return vm;
 
-    // Tìm máy chưa cấp phát (Ưu tiên máy có Port nhỏ nhất để gọn)
     vm = await this.vmRepo.findOne({ 
         where: { isAllocated: false },
         order: { port: 'ASC' }
     });
     
-    if (!vm) throw new NotFoundException('Hệ thống hết máy ảo. Vui lòng liên hệ giám thị.');
+    if (!vm) throw new NotFoundException('Hết máy ảo.');
 
     vm.isAllocated = true;
     vm.allocatedToUserId = userId;
@@ -30,9 +34,8 @@ export class VdiService {
     return vm;
   }
 
-  // --- HÀM TẠO TOKEN (PHIÊN BẢN VNC - NO PASSWORD) ---
-generateGuacamoleToken(vm: Vm): string {
-    const connectionSettings = {
+  generateGuacamoleToken(vm: Vm): string {
+    const connectionParams = {
       connection: {
         type: 'rdp',
         settings: {
@@ -40,50 +43,40 @@ generateGuacamoleToken(vm: Vm): string {
           port: String(vm.port),
           username: vm.username,
           password: vm.password,
-          
-          // --- [FIX] BẢO MẬT & MẠNG ---
-          security: 'any',
+          security: 'nla',
           'ignore-cert': 'true',
-          'enable-keep-alive': 'true',       // [QUAN TRỌNG] Giữ kết nối
-          'keep-alive-interval': '30',       // Ping mỗi 30s
-          
-          // --- HIỆU NĂNG ---
-          'disable-wallpaper': 'true',
-          'disable-theming': 'true',
-          'disable-menu-animations': 'true',
-          'disable-aero': 'true',
-          
-          // Bật cache để đỡ tốn băng thông
-          'disable-bitmap-caching': 'true',
-          'disable-offscreen-caching': 'true',
-          'disable-glyph-caching': 'true',
-          
-          'disable-audio': 'true',          
-          'color-depth': '32',        
-          
-          'enable-font-smoothing': 'false',
-          'disable-full-window-drag': 'true',
-          
-          'force-lossless': 'true',
-          'resize-method': 'display-update', // Resize mượt mà
+          'enable-keep-alive': 'true',
+          'resize-method': 'display-update',
           dpi: '96',
           'server-layout': 'en-us-qwerty',
+          'disable-wallpaper': 'true',
+          'disable-theming': 'true',
+
+          'enable-wallpaper': 'false',
+          'enable-theming': 'false',
+          'enable-font-smoothing': 'false',
+          'enable-desktop-composition': 'false',
         },
       },
     };
 
-    // Mã hóa Token (Giữ nguyên logic cũ)
-    const keyString = 'MySuperSecretKeyForEncryption123';
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-cbc', keyString, iv);
-    
-    let encrypted = cipher.update(JSON.stringify(connectionSettings), 'utf8', 'base64');
-    encrypted += cipher.final('base64');
+    return this.encryptGuacamoleToken(connectionParams);
+  }
 
-    return Buffer.from(JSON.stringify({ 
-        iv: iv.toString('base64'), 
-        value: encrypted 
-    })).toString('base64');
+  private encryptGuacamoleToken(payload: object): string {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv(this.guacCypher, this.guacKey, iv);
+    const encrypted = Buffer.concat([
+      cipher.update(JSON.stringify(payload), 'utf8'),
+      cipher.final(),
+    ]);
+
+    const tokenData = {
+      iv: iv.toString('base64'),
+      value: encrypted.toString('base64'),
+    };
+
+    return Buffer.from(JSON.stringify(tokenData)).toString('base64');
   }
 
   async releaseVm(userId: number) {
