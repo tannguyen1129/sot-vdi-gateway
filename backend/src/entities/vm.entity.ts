@@ -20,9 +20,12 @@ export class Vm {
   @Column({ default: false })
   isAllocated: boolean;
 
-  // --- SỬA DÒNG NÀY ---
-  @Column({ type: 'int', nullable: true }) // Thêm type: 'int' để Postgres hiểu đây là số
+
+  @Column({ type: 'int', nullable: true }) 
   allocatedToUserId: number | null;
+
+  @Column({ nullable: true })
+  vmid: number;
 
   @UpdateDateColumn()
   lastActivity: Date;

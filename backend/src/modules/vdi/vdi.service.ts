@@ -48,24 +48,23 @@ generateGuacamoleToken(vm: Vm): string {
           port: String(vm.port),
           username: vm.username,
           password: vm.password,
-          
           security: 'nla',
           'ignore-cert': true,
 
-          // ========================================================
-          // CẤU HÌNH FINAL (KHI ĐÃ CÓ NGINX)
-          // ========================================================
-          
-          'disable-gfx': false,       // BẬT GFX (Windows sẽ gửi luồng H.264)
-          'color-depth': 32,          // Màu đẹp nhất
+          // --- CẤU HÌNH HÌNH ẢNH (GIỮ NGUYÊN) ---
+          'disable-gfx': false, 
+          'color-depth': 32,
           'resize-method': 'display-update',
-
-          // 4. Bật full hiệu ứng đẹp
           'enable-wallpaper': true,   
           'enable-theming': true,
           'enable-font-smoothing': true,
           'enable-menu-animations': true,
           'enable-desktop-composition': true,
+
+          // --- [FIX QUAN TRỌNG] TẮT AUDIO ĐỂ TRÁNH SẬP SOCKET ---
+          // Thêm 2 dòng này vào:
+          'disable-audio': true, 
+          'enable-audio-input': false, 
 
           // Tắt cache để tránh rác
           'disable-bitmap-caching': true,
