@@ -5,37 +5,65 @@ import { useParams, useRouter } from "next/navigation";
 import api from "./../../utils/axios";
 
 import ExamLobby from "./components/ExamLobby";
-import ExamMachine from "./components/ExamMachine";
+import ExamInterface, { StudentInfo } from "../../components/ExamInterface"; 
+
+// Interface cho dữ liệu phiên thi trả về từ Backend
+interface ExamSessionData {
+  connectionToken: string;
+  vmInfo: {
+    ip: string;
+    username: string;
+  };
+}
 
 export default function ExamPage() {
   const params = useParams();
   const router = useRouter();
 
-  // id có thể là string | string[]
+  // Lấy Exam ID an toàn từ URL
   const examId = useMemo(() => {
     const raw = (params as any)?.id;
     return Array.isArray(raw) ? raw[0] : raw;
   }, [params]);
 
+  // --- STATES ---
   const [user, setUser] = useState<any>(null);
   const [exam, setExam] = useState<any>(null);
-  const [token, setToken] = useState<string | null>(null);
+  
+  // Lưu session gồm Token và Info máy ảo
+  const [examSession, setExamSession] = useState<ExamSessionData | null>(null);
+  
+  const [clientIp, setClientIp] = useState<string>("Đang lấy IP..."); // IP máy thí sinh
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isReady, setIsReady] = useState(false);
 
-  // 1) Load user + exam
+  // 1. Lấy IP thực của máy thí sinh (Client IP)
+  useEffect(() => {
+    const fetchClientIp = async () => {
+      try {
+        const response = await fetch('https://api.ipify.org?format=json');
+        const data = await response.json();
+        setClientIp(data.ip);
+      } catch (err) {
+        console.error("Failed to fetch Client IP:", err);
+        setClientIp("Unknown IP");
+      }
+    };
+    fetchClientIp();
+  }, []);
+
+  // 2. Bootstrap: Load User & Thông tin kỳ thi
   useEffect(() => {
     let cancelled = false;
-
     const bootstrap = async () => {
       try {
+        // Kiểm tra User đăng nhập
         const userStr = localStorage.getItem("user");
         if (!userStr) {
           router.push("/login");
           return;
         }
-
         const localUser = JSON.parse(userStr);
         if (!cancelled) setUser(localUser);
 
@@ -44,106 +72,95 @@ export default function ExamPage() {
           return;
         }
 
+        // Gọi API lấy thông tin đề thi
         const res = await api.get(`/exams/${examId}`);
         if (!cancelled) {
           setExam(res.data);
           setIsReady(true);
         }
       } catch (err) {
-        alert("Không tìm thấy kỳ thi!");
+        // alert("Không tìm thấy kỳ thi hoặc bạn không có quyền truy cập!");
         router.push("/dashboard");
       }
     };
-
     bootstrap();
-
-    return () => {
-      cancelled = true;
-      // dọn fullscreen nếu user back giữa chừng
-      try {
-        if (document.fullscreenElement) document.exitFullscreen();
-      } catch {}
-    };
+    return () => { cancelled = true; };
   }, [examId, router]);
 
-  // 2) Join
+  // 3. Xử lý Join Exam (Gọi API Backend)
   const handleJoin = async (accessCode: string) => {
-    if (!user?.id) {
-      setErrorMsg("Thông tin người dùng chưa sẵn sàng, vui lòng thử lại.");
-      return;
-    }
-    if (!examId) {
-      setErrorMsg("Không tìm thấy ID kỳ thi.");
-      return;
-    }
-
+    if (!user?.id) return;
     setLoading(true);
     setErrorMsg("");
 
     try {
-      const res = await api.post(`/exams/${examId}/join`, {
-        userId: user.id,
-        accessCode,
-      });
+        // Gọi API Backend: POST /exams/:id/join
+        // Backend cần trả về: { connectionToken: "...", vmInfo: { ip: "...", username: "..." } }
+        const res = await api.post(`/exams/${examId}/join`, { 
+            userId: user.id, 
+            accessCode 
+        });
 
-      if (res.data?.connectionToken) {
-        setToken(res.data.connectionToken);
-
-        // yêu cầu fullscreen (có thể bị chặn nếu không do user gesture)
-        try {
-          await document.documentElement.requestFullscreen();
-        } catch (e) {
-          console.log("Fullscreen denied");
+        if (res.data?.connectionToken) {
+            setExamSession({
+                connectionToken: res.data.connectionToken,
+                vmInfo: res.data.vmInfo || { ip: "Unknown", username: "Unknown" } // Fallback nếu backend chưa update
+            });
         }
-      } else {
-        setErrorMsg("Không nhận được token kết nối.");
-      }
     } catch (err: any) {
-      setErrorMsg(err.response?.data?.message || "Lỗi kết nối máy chủ thi.");
+        const msg = err.response?.data?.message || "Lỗi kết nối đến máy chủ thi.";
+        setErrorMsg(msg);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
   };
 
-  // 3) Exit
-  const handleExit = async () => {
-    if (!user?.id) return;
-
-    if (!confirm("Bạn có chắc chắn muốn thoát? Máy ảo sẽ bị tắt.")) return;
-
-    try {
-      await api.post("/exams/leave", { userId: user.id });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      try {
-        if (document.fullscreenElement) await document.exitFullscreen();
-      } catch {}
-      router.push("/dashboard");
-    }
+  // Helper tính thời gian còn lại (seconds)
+  const calculateTimeLeft = (endTimeStr: string) => {
+    if (!endTimeStr) return 0;
+    const now = new Date().getTime();
+    const end = new Date(endTimeStr).getTime();
+    const diff = Math.floor((end - now) / 1000);
+    return diff > 0 ? diff : 0;
   };
+
+  // --- RENDER ---
 
   if (!isReady) {
     return (
-      <div className="h-screen bg-gray-50 flex items-center justify-center">
-        Đang tải dữ liệu...
+      <div className="h-screen flex flex-col items-center justify-center bg-gray-900 text-white">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
+        <p>Đang tải dữ liệu phòng thi...</p>
       </div>
     );
   }
 
-  // ✅ Có token -> ép full-screen “thật” để GuacamoleDisplay không bao giờ height=0
-  if (token) {
+  // TRƯỜNG HỢP 1: ĐÃ CÓ SESSION -> VÀO GIAO DIỆN THI (ANTI-CHEAT MODE)
+  if (examSession && user && exam) {
+    const studentInfo: StudentInfo = {
+        name: user.fullName || user.username,
+        username: user.username,
+        clientIp: clientIp,
+        vmIp: examSession.vmInfo.ip,
+        vmUsername: examSession.vmInfo.username,
+        timeLeft: calculateTimeLeft(exam.endTime)
+    };
+
     return (
-      <div className="fixed inset-0 w-screen h-screen bg-black">
-        {/* key để remount sạch khi token đổi */}
-        <ExamMachine key={token} examName={exam?.name} token={token} onExit={handleExit} />
-      </div>
+      <ExamInterface 
+        token={examSession.connectionToken} 
+        studentInfo={studentInfo}
+        // --- [FIX LỖI 500] THÊM 2 DÒNG NÀY ---
+        examId={exam.id}
+        userId={user.id}
+        // ------------------------------------
+      />
     );
   }
 
-  // Chưa có token -> Lobby
+  // TRƯỜNG HỢP 2: CHƯA CÓ SESSION -> Ở SẢNH CHỜ (LOBBY)
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-gray-50">
       <ExamLobby
         exam={exam}
         user={user}

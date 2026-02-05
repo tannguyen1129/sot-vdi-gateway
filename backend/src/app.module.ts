@@ -14,8 +14,12 @@ import { User } from './entities/user.entity';
 import { Vm } from './entities/vm.entity';
 import { Exam } from './entities/exam.entity';
 
+import { MonitoringModule } from './modules/monitoring/monitoring.module';
+import { ScheduleModule } from '@nestjs/schedule/dist/schedule.module';
+
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     // 2. Cấu hình ConfigModule để đọc file .env
     ConfigModule.forRoot({
       isGlobal: true, // Để dùng được ở mọi nơi
@@ -39,6 +43,7 @@ import { Exam } from './entities/exam.entity';
     VdiModule,
     AdminModule, 
     ExamsModule,
+    MonitoringModule,
   ],
 })
 export class AppModule {}

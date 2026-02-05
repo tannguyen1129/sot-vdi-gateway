@@ -1,25 +1,69 @@
-import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Vm } from '../../entities/vm.entity';
+import { Cron, CronExpression } from '@nestjs/schedule'; // Import chuẩn từ NestJS
 import * as crypto from 'crypto';
 
-// Giả sử bạn có ProxmoxService để gọi API tắt máy (Nếu chưa có thì cần tạo)
-// import { ProxmoxService } from '../proxmox/proxmox.service'; 
+// Import Entities
+import { Vm } from '../../entities/vm.entity';
+import { ExamLog } from '../../entities/exam-log.entity';
 
 @Injectable()
 export class VdiService {
   private readonly guacCypher = 'AES-256-CBC';
   private readonly guacKey = process.env.GUAC_CRYPT_KEY || 'MySuperSecretKeyForEncryption123';
+  private readonly logger = new Logger(VdiService.name);
 
-  // Biến lưu trữ instance Guacamole Server (Cần được set từ main.ts hoặc module khác)
+  // Biến static để lưu instance Guacamole Server (được set từ main.ts)
   public static guacamoleServerInstance: any = null;
 
   constructor(
     @InjectRepository(Vm)
     private vmRepo: Repository<Vm>,
-    // @Inject(ProxmoxService) private proxmoxService: ProxmoxService, // Uncomment nếu đã có service này
+
+    // [QUAN TRỌNG] Inject Repository của ExamLog vào đây để dùng được trong hàm Cron
+    @InjectRepository(ExamLog)
+    private examLogRepo: Repository<ExamLog>,
   ) {}
+
+  // --- TỰ ĐỘNG THU HỒI MÁY TREO (Mỗi phút chạy 1 lần) ---
+  @Cron(CronExpression.EVERY_MINUTE)
+  async autoReleaseIdleVms() {
+    this.logger.debug('[Cron] Đang quét máy ảo treo...');
+
+    // 1. Lấy danh sách máy ảo đang cấp phát (isAllocated = true)
+    const activeVms = await this.vmRepo.find({ 
+      where: { isAllocated: true } 
+    });
+
+    if (activeVms.length === 0) return;
+
+    // 2. Duyệt từng máy để kiểm tra sự sống
+    for (const vm of activeVms) {
+      if (!vm.allocatedToUserId) continue;
+
+      // Tìm log hoạt động cuối cùng của user này
+      const lastLog = await this.examLogRepo.findOne({
+        where: { userId: vm.allocatedToUserId },
+        order: { createdAt: 'DESC' }, // Lấy cái mới nhất
+      });
+
+      // 3. Logic kiểm tra thời gian
+      const now = new Date();
+      // Timeout là 10 phút (Nếu không có hoạt động gì trong 10p sẽ bị thu hồi)
+      const timeoutThreshold = new Date(now.getTime() - 10 * 60 * 1000);
+
+      // Điều kiện thu hồi:
+      // - Case 1: Không có log nào (Vào thi nhưng không load được trang hoặc tắt ngay lập tức)
+      // - Case 2: Log cuối cùng cũ hơn 10 phút (Đã tắt trình duyệt nghỉ thi)
+      if (!lastLog || lastLog.createdAt < timeoutThreshold) {
+        this.logger.warn(`[AUTO-CLEANUP] Thu hồi máy ${vm.ip} của User ${vm.allocatedToUserId} do không hoạt động > 10 phút.`);
+        
+        // Gọi hàm thu hồi (Hàm này nằm ở phần dưới của file)
+        await this.revokeVmConnection(vm.allocatedToUserId);
+      }
+    }
+  }
 
   async allocateVm(userId: number): Promise<Vm> {
     let vm = await this.vmRepo.findOne({ where: { allocatedToUserId: userId } });
@@ -112,23 +156,36 @@ generateGuacamoleToken(vm: Vm): string {
     
     if (!vm) return; // User không có máy ảo nào
 
-    // 2. Ngắt kết nối Guacamole
-    // Lưu ý: GuacamoleLite nằm ở tầng Socket, Service này khó gọi trực tiếp nếu không dùng Singleton hoặc Global.
-    // Đây là cách đi đường vòng thông qua biến Static (hoặc bạn dùng Redis Pub/Sub để bắn sự kiện)
+    // --- [PHẦN MỚI QUAN TRỌNG] GHI LOG HỆ THỐNG ---
+    // Mục đích: Để Admin thấy dòng chữ màu đỏ "REVOKE" trên màn hình giám sát
+    try {
+        await this.examLogRepo.save({
+            userId: userId,
+            action: 'REVOKE', 
+            details: `Hệ thống tự động thu hồi máy ${vm.ip} do treo quá 10 phút.`,
+            clientIp: 'SYSTEM'
+        });
+    } catch (e) {
+        // Chỉ log lỗi ra console, không chặn quy trình thu hồi
+        this.logger.error(`Không thể ghi log REVOKE cho user ${userId}: ${e.message}`);
+    }
+
+    // 2. Ngắt kết nối Guacamole (Nếu có implement)
     if (VdiService.guacamoleServerInstance) {
-        // Giả sử server có hàm closeConnection(clientIdentifier)
-        // Bạn cần implement logic map userId -> connectionId trong GuacamoleLite
-        console.log(`[VDI] Closing connection for User ${userId}`);
+        // console.log(`[VDI] Đóng socket Guacamole của User ${userId}`);
         // VdiService.guacamoleServerInstance.closeConnection(userId); 
     }
 
-    // 3. Gọi Proxmox API để tắt máy ảo (Stop VM)
+    // 3. Gọi Proxmox API để tắt máy ảo (Nếu có implement)
     if (vm.vmid) {
-       console.log(`[VDI] Stopping Proxmox VM ID: ${vm.vmid}`);
-       // await this.proxmoxService.stopVm(vm.vmid); // Uncomment khi có Proxmox Service
+       // console.log(`[VDI] Đang tắt Proxmox VM ID: ${vm.vmid}`);
+       // await this.proxmoxService.stopVm(vm.vmid); 
     }
 
-    // 4. Giải phóng database
+    // 4. Giải phóng máy ảo trong Database (Reset isAllocated = false)
+    // Hàm này bạn đã có ở dưới, tái sử dụng luôn
     await this.releaseVm(userId);
+    
+    this.logger.log(`[VDI] Đã thu hồi thành công máy ${vm.ip} của User ${userId}`);
   }
 }

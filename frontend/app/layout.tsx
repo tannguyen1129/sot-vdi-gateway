@@ -9,7 +9,7 @@ import Footer from "./components/Footer";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "UMT VDI Portal",
+  title: "SOT VDI Gateways",
   description: "Hệ thống thi thực hành trực tuyến",
 };
 

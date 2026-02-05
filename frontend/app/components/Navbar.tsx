@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -6,10 +7,12 @@ import { usePathname, useRouter } from 'next/navigation';
 export default function Navbar() {
   const [user, setUser] = useState<any>(null);
   const [mounted, setMounted] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
   const pathname = usePathname();
   const router = useRouter();
 
-  // HÀM CẬP NHẬT USER TỪ LOCALSTORAGE
+  // --- LOGIC AUTH ---
   const updateUser = () => {
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
@@ -21,140 +24,200 @@ export default function Navbar() {
 
   useEffect(() => {
     setMounted(true);
-    updateUser(); // 1. Chạy lần đầu khi load trang
-
-    // 2. Lắng nghe tín hiệu "auth-change" (Tự chế)
-    const handleAuthChange = () => updateUser();
+    updateUser();
     
+    const handleAuthChange = () => updateUser();
     window.addEventListener('auth-change', handleAuthChange);
-    window.addEventListener('storage', handleAuthChange); // Lắng nghe cả khi mở tab khác
+    window.addEventListener('storage', handleAuthChange);
 
-    // Dọn dẹp khi component bị hủy
     return () => {
       window.removeEventListener('auth-change', handleAuthChange);
       window.removeEventListener('storage', handleAuthChange);
     };
   }, []);
 
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
+
   const handleLogout = () => {
     localStorage.removeItem('user');
-    // 3. Gửi tín hiệu báo đã Logout
-    window.dispatchEvent(new Event('auth-change')); 
+    window.dispatchEvent(new Event('auth-change'));
     router.push('/login');
   };
 
-  // Ẩn Navbar khi đang trong phòng thi (để tập trung)
   const isStudentExamPage = pathname.includes('/exam') && !pathname.startsWith('/admin');
   const isVdiPage = pathname.includes('/vdi');
 
-  if (isStudentExamPage || isVdiPage) {
-    return null;
-  }
-
-  if (!mounted) return <div className="h-16 bg-gray-900"></div>;
-
-  // --- CẤU HÌNH MENU CHUẨN ---
-  const adminMenu = [
-    { name: 'Trang chủ', href: '/admin' },
-    { name: 'Kỳ thi', href: '/admin/exams' },
-    { name: 'Giám sát', href: '/admin/monitor' },
-    { name: 'Danh sách sinh viên', href: '/admin/students' },
-    { name: 'Danh sách máy ảo', href: '/admin/vms' },
-  ];
-
-  const studentMenu = [
-    { name: 'Trang chủ', href: '/' },
-    { name: 'Kỳ thi', href: '/dashboard' }, // Vào dashboard để thấy kỳ thi
-    { name: 'Giới thiệu', href: '/#about' },
-    { name: 'Hướng dẫn', href: '/#guide' },
-  ];
-
-  const guestMenu = [
-    { name: 'Trang chủ', href: '/' },
-    { name: 'Giới thiệu', href: '/#about' },
-    { name: 'Hướng dẫn', href: '/#guide' },
-  ];
-
-  // --- LOGIC CHỌN MENU (SỬA LẠI CHO CHẶT) ---
-  let currentMenu = guestMenu; // Mặc định là khách
+  if (isStudentExamPage || isVdiPage) return null;
   
+  if (!mounted) return <div className="h-16 bg-white border-b border-gray-200"></div>;
+
+  // --- MENU DATA ---
+  const adminMenu = [
+    { name: 'DASHBOARD', href: '/admin' },
+    { name: 'KỲ THI', href: '/admin/exams' },
+    { name: 'GIÁM SÁT', href: '/admin/monitor' },
+    { name: 'SINH VIÊN', href: '/admin/students' },
+    { name: 'MÁY ẢO', href: '/admin/vms' },
+  ];
+  const studentMenu = [
+    { name: 'TRANG CHỦ', href: '/' },
+    { name: 'KỲ THI', href: '/dashboard' },
+    { name: 'HƯỚNG DẪN', href: '/#guide' },
+  ];
+  const guestMenu = [
+    { name: 'TRANG CHỦ', href: '/' },
+    { name: 'GIỚI THIỆU', href: '/#about' },
+    { name: 'HƯỚNG DẪN', href: '/#guide' },
+  ];
+
+  let currentMenu = guestMenu;
   if (user) {
-      // Chuẩn hóa role về chữ IN HOA để so sánh cho chắc ăn
-      const role = user.role ? user.role.toUpperCase() : ''; 
-      
-      if (role === 'ADMIN') {
-          currentMenu = adminMenu;
-      } else if (role === 'STUDENT') {
-          currentMenu = studentMenu;
-      }
+    const role = user.role ? user.role.toUpperCase() : '';
+    if (role === 'ADMIN') currentMenu = adminMenu;
+    else if (role === 'STUDENT') currentMenu = studentMenu;
   }
 
   return (
-    <nav className="bg-gray-900 border-b border-gray-800 sticky top-0 z-40 shadow-lg text-white">
-      <div className="container mx-auto px-6 h-16 flex justify-between items-center">
-        
-        {/* LOGO */}
-        <Link href="/" className="flex items-center space-x-3 group">
-          <div className="relative w-10 h-10 bg-white rounded-full p-1 flex items-center justify-center overflow-hidden">
-             <img 
-                src="/logosot.png" 
-                alt="SOT Logo" 
-                className="object-contain w-full h-full"
-                onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-             />
-             <span className="text-blue-900 font-bold text-xs absolute opacity-0 group-hover:opacity-100 transition">SOT</span>
-          </div>
-          <span className="font-bold text-xl tracking-wide bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-cyan-300">
-            SOT VDI GATEWAYS
-          </span>
-        </Link>
-
-        {/* MENU LINKS */}
-        <div className="hidden md:flex space-x-6">
-            {currentMenu.map((item) => (
-                <Link 
-                    key={item.name} 
-                    href={item.href}
-                    className={`text-sm font-medium transition hover:text-blue-400 
-                        ${pathname === item.href ? 'text-blue-400 border-b-2 border-blue-400 pb-1' : 'text-gray-300'}`}
-                >
-                    {item.name}
-                </Link>
-            ))}
-        </div>
-
-        {/* USER INFO */}
-        <div className="flex items-center space-x-4">
-          {user ? (
-            <div className="flex items-center space-x-3 pl-4 border-l border-gray-700">
-              <div className="text-right hidden lg:block">
-                <p className="text-white font-semibold text-sm">
-                  {user.fullName || user.username}
-                </p>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${user.role === 'ADMIN' ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'}`}>
-                  {user.role === 'ADMIN' ? 'ADMIN' : 'STUDENT'}
-                </span>
-              </div>
-              
-              <button 
-                onClick={handleLogout}
-                className="bg-gray-800 hover:bg-red-600 text-gray-300 hover:text-white px-3 py-1.5 rounded text-xs border border-gray-700 transition"
-              >
-                Đăng xuất
-              </button>
+    <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 text-gray-800 font-sans">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
+          
+          {/* ================= LEFT: LOGOS ================= */}
+          <Link href="/" className="flex items-center gap-4 group select-none">
+            <div className="relative h-10 w-auto flex-shrink-0">
+               <img src="/sot-xanh.png" alt="SOT" className="h-full w-auto object-contain" onError={(e) => e.currentTarget.style.display='none'} />
             </div>
-          ) : (
-            pathname !== '/login' && (
-              <Link 
-                href="/login" 
-                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-full font-medium transition shadow-lg shadow-blue-900/20 text-sm"
-              >
-                Đăng nhập
-              </Link>
-            )
-          )}
+            <div className="h-8 w-[1px] bg-gray-300 hidden sm:block"></div>
+            <div className="relative h-9 w-auto flex-shrink-0">
+               <img src="/sot-vdi.png" alt="SOT VDI" className="h-full w-auto object-contain" onError={(e) => e.currentTarget.style.display='none'} />
+            </div>
+          </Link>
+
+          {/* ================= CENTER: DESKTOP MENU (CLEAN LINE STYLE) ================= */}
+          <div className="hidden md:flex items-center h-full space-x-2">
+            {currentMenu.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link 
+                  key={item.name} 
+                  href={item.href}
+                  // QUAN TRỌNG: 
+                  // h-16: Chiều cao full navbar để border nằm sát đáy
+                  // border-b-2: Độ dày gạch chân
+                  // hover:text-blue-600: Chỉ đổi màu chữ khi hover
+                  className={`h-16 flex items-center px-3 text-sm font-bold tracking-wide transition-colors duration-200 border-b-2
+                    ${isActive 
+                      ? 'border-blue-700 text-blue-700'  // Active: Có gạch chân xanh, chữ xanh
+                      : 'border-transparent text-gray-500 hover:text-blue-600 hover:border-blue-300/50' // Inactive: Gạch chân trong suốt
+                    }`}
+                >
+                  {item.name}
+                </Link>
+              );
+            })}
+          </div>
+
+          {/* ================= RIGHT: USER INFO ================= */}
+          <div className="hidden md:flex items-center gap-4">
+            {user ? (
+              <div className="flex items-center gap-4 pl-4 border-l border-gray-300">
+                <div className="text-right leading-tight">
+                  <div className="text-sm font-bold text-gray-900 max-w-[150px] truncate">
+                    {user.fullName || user.username}
+                  </div>
+                  <div className="flex justify-end mt-0.5">
+                    <span className={`text-[10px] font-bold px-1 py-px border ${
+                      user.role === 'ADMIN' 
+                        ? 'border-red-200 text-red-600 bg-red-50' 
+                        : 'border-blue-200 text-blue-600 bg-blue-50'
+                    }`}>
+                      {user.role}
+                    </span>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={handleLogout}
+                  title="Đăng xuất"
+                  className="p-2 text-gray-400 hover:text-red-600 transition-colors duration-200"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                    <path strokeLinecap="square" strokeLinejoin="miter" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              pathname !== '/login' && (
+                <Link 
+                  href="/login" 
+                  className="px-6 py-2 text-sm font-bold text-white bg-blue-700 hover:bg-blue-800 transition-colors shadow-sm"
+                >
+                  ĐĂNG NHẬP
+                </Link>
+              )
+            )}
+          </div>
+
+          {/* ================= MOBILE HAMBURGER ================= */}
+          <div className="flex md:hidden">
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="p-2 text-gray-600 hover:text-blue-600 transition-colors"
+            >
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={2} d={isMobileMenuOpen ? "M6 18L18 6M6 6l12 12" : "M4 6h16M4 12h16M4 18h16"} />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* ================= MOBILE MENU ================= */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden border-t border-gray-200 bg-white">
+          <div className="flex flex-col">
+            {currentMenu.map((item) => {
+               const isActive = pathname === item.href;
+               return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  // Mobile: Bỏ background, chỉ dùng chữ đậm và màu xanh để báo hiệu active
+                  className={`block px-5 py-4 text-sm font-bold border-l-4 transition-colors ${
+                    isActive
+                      ? 'border-blue-700 text-blue-700 bg-gray-50'
+                      : 'border-transparent text-gray-600 hover:text-blue-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {item.name}
+                </Link>
+              )
+            })}
+          </div>
+          
+          <div className="border-t border-gray-200 p-4">
+            {user ? (
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-base font-bold text-gray-900">{user.fullName || user.username}</div>
+                  <div className="text-xs font-semibold text-gray-500 uppercase">{user.role}</div>
+                </div>
+                <button onClick={handleLogout} className="text-sm font-bold text-red-600 hover:text-red-800">
+                  ĐĂNG XUẤT
+                </button>
+              </div>
+            ) : (
+              pathname !== '/login' && (
+                <Link href="/login" className="block w-full text-center px-5 py-3 text-sm font-bold text-white bg-blue-700 hover:bg-blue-800">
+                  ĐĂNG NHẬP
+                </Link>
+              )
+            )}
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

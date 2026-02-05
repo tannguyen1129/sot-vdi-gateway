@@ -109,7 +109,11 @@ export class ExamsService {
         examName: exam.name,
         startTime: exam.startTime,
         endTime: exam.endTime,
-        connectionToken: encryptedToken // Token này đã được tối ưu (16-bit color, no-gfx...)
+        connectionToken: encryptedToken, // Token này đã được tối ưu (16-bit color, no-gfx...)
+        vmInfo: {
+        ip: allocatedVm.ip,         // IP máy ảo
+        username: allocatedVm.username // User máy ảo (vd: Administrator)
+      }
     };
   }
 

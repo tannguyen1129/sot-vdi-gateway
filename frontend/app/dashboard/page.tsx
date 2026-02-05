@@ -32,23 +32,23 @@ export default function Dashboard() {
     fetchExams();
   }, [router]);
 
-  // --- 2. LOGIC PHÂN LOẠI KỲ THI ---
+  // --- 2. LOGIC PHÂN LOẠI ---
   const now = new Date();
 
-  // A. Đang diễn ra: (Start <= Now <= End) VÀ (isActive = true)
+  // A. Đang diễn ra
   const ongoingExams = exams.filter(e => {
       const start = new Date(e.startTime);
       const end = new Date(e.endTime);
       return e.isActive && now >= start && now <= end;
   });
 
-  // B. Sắp diễn ra: (Start > Now) VÀ (isActive = true)
+  // B. Sắp diễn ra
   const upcomingExams = exams.filter(e => {
       const start = new Date(e.startTime);
       return e.isActive && start > now;
   });
 
-  // C. Đã kết thúc: (End < Now) HOẶC (isActive = false)
+  // C. Đã kết thúc
   const pastExams = exams.filter(e => {
       const end = new Date(e.endTime);
       return !e.isActive || end < now;
@@ -58,121 +58,185 @@ export default function Dashboard() {
     router.push(`/exam/${examId}`);
   };
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Đang tải dữ liệu...</div>;
+  // --- COMPONENT CARD HIỆN ĐẠI (Vuông vức) ---
+  const ExamCard = ({ exam, type }: { exam: any, type: 'ONGOING' | 'UPCOMING' | 'PAST' }) => {
+    // Cấu hình màu sắc dựa trên Type
+    const statusConfig = {
+        ONGOING: {
+            border: 'border-blue-600',
+            bgHover: 'hover:border-blue-600 hover:shadow-lg hover:shadow-blue-900/5',
+            badgeBg: 'bg-blue-600',
+            badgeText: 'text-white',
+            label: 'ĐANG DIỄN RA',
+            btnStyle: 'bg-blue-600 text-white hover:bg-blue-700'
+        },
+        UPCOMING: {
+            border: 'border-amber-500',
+            bgHover: 'hover:border-amber-500 hover:shadow-lg hover:shadow-amber-900/5',
+            badgeBg: 'bg-amber-100',
+            badgeText: 'text-amber-700',
+            label: 'SẮP BẮT ĐẦU',
+            btnStyle: 'bg-white border border-slate-300 text-slate-600 hover:border-amber-500 hover:text-amber-600'
+        },
+        PAST: {
+            border: 'border-slate-300',
+            bgHover: 'opacity-75',
+            badgeBg: 'bg-slate-100',
+            badgeText: 'text-slate-500',
+            label: 'ĐÃ KẾT THÚC',
+            btnStyle: 'bg-slate-100 text-slate-400 cursor-not-allowed'
+        }
+    };
 
-  // --- COMPONENT CON ĐỂ RENDER CARD (Cho gọn code) ---
-  const ExamCard = ({ exam, type }: { exam: any, type: 'ONGOING' | 'UPCOMING' | 'PAST' }) => (
-    <div className={`rounded-xl shadow-sm border transition duration-200 
-        ${type === 'ONGOING' ? 'bg-white border-blue-200 shadow-md ring-1 ring-blue-100 hover:shadow-xl' : ''}
-        ${type === 'UPCOMING' ? 'bg-white border-gray-100 hover:shadow-md' : ''}
-        ${type === 'PAST' ? 'bg-gray-50 border-gray-200 opacity-75 grayscale hover:grayscale-0' : ''}
-    `}>
-        {/* Header màu mè phân loại */}
-        <div className={`h-1.5 rounded-t-xl w-full
-            ${type === 'ONGOING' ? 'bg-gradient-to-r from-green-400 to-blue-500 animate-pulse' : ''}
-            ${type === 'UPCOMING' ? 'bg-yellow-400' : ''}
-            ${type === 'PAST' ? 'bg-gray-300' : ''}
-        `}></div>
+    const config = statusConfig[type];
 
-        <div className="p-5">
-            <div className="flex justify-between items-start mb-3">
-                <h3 className={`font-bold text-lg ${type === 'PAST' ? 'text-gray-600' : 'text-gray-800'}`}>
-                    {exam.name}
-                </h3>
-                {type === 'ONGOING' && <span className="bg-red-100 text-red-600 text-xs px-2 py-1 rounded font-bold animate-pulse">● Đang thi</span>}
-                {type === 'UPCOMING' && <span className="bg-yellow-100 text-yellow-700 text-xs px-2 py-1 rounded font-bold">Sắp tới</span>}
-                {type === 'PAST' && <span className="bg-gray-200 text-gray-500 text-xs px-2 py-1 rounded font-bold">Đã đóng</span>}
-            </div>
+    return (
+        <div className={`group relative bg-white border border-slate-200 border-l-4 p-6 transition-all duration-300 ${config.border} ${config.bgHover}`}>
             
-            <div className="space-y-2 text-sm text-gray-600 mb-5">
-                <div className="flex items-center gap-2">
-                    <span className="text-gray-400">🕒 Bắt đầu:</span>
-                    <span className="font-medium">
-                        {new Date(exam.startTime).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}
+            {/* Header: Badge & Title */}
+            <div className="flex justify-between items-start mb-4">
+                <div>
+                    <span className={`inline-block px-2 py-1 text-[10px] font-bold uppercase tracking-wider mb-2 ${config.badgeBg} ${config.badgeText}`}>
+                        {config.label}
                     </span>
-                </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-gray-400">⏳ Kết thúc:</span>
-                    <span className="font-medium">
-                        {new Date(exam.endTime).toLocaleString('vi-VN')}
-                    </span>
+                    <h3 className={`text-lg font-bold leading-tight ${type === 'PAST' ? 'text-slate-500' : 'text-slate-900'}`}>
+                        {exam.name}
+                    </h3>
                 </div>
             </div>
 
-            {/* Nút bấm chỉ hiện khi ĐANG DIỄN RA hoặc SẮP TỚI (vào sảnh chờ trước) */}
-            {type !== 'PAST' ? (
-                <button 
-                    onClick={() => handleEnterExam(exam.id)}
-                    className={`w-full font-bold py-2.5 rounded-lg transition flex items-center justify-center gap-2
-                        ${type === 'ONGOING' 
-                            ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200 shadow-lg' 
-                            : 'bg-white border border-blue-600 text-blue-600 hover:bg-blue-50'}
-                    `}
-                >
-                    {type === 'ONGOING' ? 'VÀO THI NGAY 🚀' : 'Vào sảnh chờ →'}
-                </button>
-            ) : (
-                <button disabled className="w-full bg-gray-200 text-gray-400 font-bold py-2.5 rounded-lg cursor-not-allowed">
-                    Đã kết thúc
-                </button>
-            )}
+            {/* Time Info */}
+            <div className="space-y-3 mb-6 border-t border-slate-100 pt-4">
+                <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 flex items-center justify-center bg-slate-50 border border-slate-200 text-slate-400">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+                    <div>
+                        <p className="text-xs text-slate-500 uppercase font-semibold">Bắt đầu</p>
+                        <p className="font-mono font-medium text-slate-700">
+                            {new Date(exam.startTime).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3 text-sm">
+                    <div className="w-8 h-8 flex items-center justify-center bg-slate-50 border border-slate-200 text-slate-400">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+                    <div>
+                        <p className="text-xs text-slate-500 uppercase font-semibold">Kết thúc</p>
+                        <p className="font-mono font-medium text-slate-700">
+                            {new Date(exam.endTime).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Action Button */}
+            <button 
+                onClick={() => type !== 'PAST' && handleEnterExam(exam.id)}
+                disabled={type === 'PAST'}
+                className={`w-full py-3 px-4 font-bold text-sm uppercase tracking-wider transition-all duration-200 flex items-center justify-center gap-2 ${config.btnStyle}`}
+            >
+                {type === 'ONGOING' && (
+                    <>
+                        VÀO THI NGAY
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                        </span>
+                    </>
+                )}
+                {type === 'UPCOMING' && 'VÀO SẢNH CHỜ'}
+                {type === 'PAST' && 'ĐÃ ĐÓNG'}
+            </button>
         </div>
+    );
+  };
+
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6 md:p-12">
-      <div className="max-w-5xl mx-auto space-y-10">
+    <div className="min-h-screen bg-slate-50 relative font-sans text-slate-800">
+       
+       {/* Background Grid Pattern (Giống Landing Page) */}
+       <div className="absolute inset-0 z-0 pointer-events-none">
+            <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_0%,#000_70%,transparent_100%)]"></div>
+       </div>
+
+      <div className="max-w-6xl mx-auto px-6 py-12 relative z-10">
         
-        {/* Header chào hỏi (Đã xóa nút Đăng xuất vô duyên) */}
-        <div>
-            <h1 className="text-3xl font-bold text-gray-800">Trang chủ thi cử</h1>
-            <p className="text-gray-600 mt-1">
-                Chào <span className="font-bold text-blue-600">{user?.fullName}</span>, chúc bạn làm bài thật tốt! 💪
-            </p>
+        {/* HEADER SECTION */}
+        <div className="mb-12 border-b border-slate-200 pb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+            <div>
+                <h1 className="text-3xl font-black text-slate-900 uppercase tracking-tight">Cổng thi trực tuyến</h1>
+                <p className="text-slate-500 mt-2 text-sm font-medium">
+                    Xin chào, <span className="text-blue-600 font-bold">{user?.fullName || 'Sinh viên'}</span>. Chúc bạn hoàn thành bài thi thật tốt.
+                </p>
+            </div>
+            <div className="text-right hidden md:block">
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Thời gian hệ thống</div>
+                <div className="text-xl font-mono font-bold text-slate-700">
+                    {now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+            </div>
         </div>
 
-        {/* --- TẦNG 1: ĐANG DIỄN RA (Quan trọng nhất) --- */}
-        <section>
-            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                🔥 Đang diễn ra <span className="text-sm font-normal text-gray-500">({ongoingExams.length})</span>
-            </h2>
+        {/* --- TẦNG 1: ĐANG DIỄN RA (Priority) --- */}
+        <section className="mb-12">
+            <div className="flex items-center gap-3 mb-6">
+                <div className="h-6 w-1 bg-blue-600"></div>
+                <h2 className="text-xl font-bold text-slate-900 uppercase tracking-wide">
+                    Đang diễn ra <span className="ml-2 text-sm bg-blue-100 text-blue-700 px-2 py-0.5 rounded-none font-bold">{ongoingExams.length}</span>
+                </h2>
+            </div>
+            
             {ongoingExams.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {ongoingExams.map(exam => <ExamCard key={exam.id} exam={exam} type="ONGOING" />)}
                 </div>
             ) : (
-                <div className="bg-white p-6 rounded-lg border border-dashed border-gray-300 text-center text-gray-400">
-                    Hiện không có kỳ thi nào đang diễn ra.
+                <div className="bg-white border border-dashed border-slate-300 p-8 text-center">
+                    <p className="text-slate-400 font-medium text-sm">Hiện không có kỳ thi nào đang diễn ra.</p>
                 </div>
             )}
         </section>
 
         {/* --- TẦNG 2: SẮP DIỄN RA --- */}
-        <section>
-            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                📅 Sắp diễn ra <span className="text-sm font-normal text-gray-500">({upcomingExams.length})</span>
-            </h2>
+        <section className="mb-12">
+             <div className="flex items-center gap-3 mb-6">
+                <div className="h-6 w-1 bg-amber-500"></div>
+                <h2 className="text-xl font-bold text-slate-900 uppercase tracking-wide">
+                    Sắp diễn ra <span className="ml-2 text-sm bg-amber-50 text-amber-700 px-2 py-0.5 rounded-none font-bold">{upcomingExams.length}</span>
+                </h2>
+            </div>
             {upcomingExams.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {upcomingExams.map(exam => <ExamCard key={exam.id} exam={exam} type="UPCOMING" />)}
                 </div>
             ) : (
-                <p className="text-gray-400 text-sm italic">Không có kỳ thi nào sắp tới.</p>
+                <p className="text-slate-400 text-sm italic pl-4">Không có kỳ thi nào sắp tới.</p>
             )}
         </section>
 
-        {/* --- TẦNG 3: ĐÃ KẾT THÚC --- */}
-        <section className="opacity-80 hover:opacity-100 transition">
-            <h2 className="text-xl font-bold text-gray-600 mb-4 flex items-center gap-2">
-                🗄️ Đã kết thúc / Đóng <span className="text-sm font-normal text-gray-400">({pastExams.length})</span>
-            </h2>
+        {/* --- TẦNG 3: LỊCH SỬ --- */}
+        <section className="opacity-75 hover:opacity-100 transition-opacity duration-300">
+             <div className="flex items-center gap-3 mb-6">
+                <div className="h-6 w-1 bg-slate-400"></div>
+                <h2 className="text-xl font-bold text-slate-600 uppercase tracking-wide">
+                    Lịch sử thi <span className="ml-2 text-sm bg-slate-100 text-slate-500 px-2 py-0.5 rounded-none font-bold">{pastExams.length}</span>
+                </h2>
+            </div>
             {pastExams.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {pastExams.map(exam => <ExamCard key={exam.id} exam={exam} type="PAST" />)}
                 </div>
             ) : (
-                <p className="text-gray-400 text-sm italic">Lịch sử trống.</p>
+                <p className="text-slate-400 text-sm italic pl-4">Chưa có lịch sử thi.</p>
             )}
         </section>
 
