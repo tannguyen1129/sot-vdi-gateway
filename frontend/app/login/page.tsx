@@ -142,7 +142,7 @@ export default function LoginPage() {
       
       {/* Footer Info */}
       <div className="absolute bottom-6 text-center w-full text-slate-400 text-xs font-medium">
-         &copy; 2026 SOT VDI Gateways. Powered by TechGen.
+         &copy; 2026 SOT VDI Gateways. Powered by TechGen Team.
       </div>
 
     </div>
