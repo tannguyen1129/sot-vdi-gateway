@@ -28,15 +28,17 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
   const [timeLeft, setTimeLeft] = useState(studentInfo.timeLeft);
   const [isLocked, setIsLocked] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false); // Menu tạm dừng (Alt+Enter)
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false); // [MỚI] Modal xác nhận nộp bài
   const [hasStarted, setHasStarted] = useState(false);
   const [violation, setViolation] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // --- REFS (Để xử lý logic không gây re-render) ---
-  const isSubmittingRef = useRef(false); // Cờ báo hiệu đang nộp bài (để chặn log vi phạm)
-  const isUnlockIntentRef = useRef(false); // Cờ báo hiệu chủ động mở menu (Alt+Enter)
+  // --- REFS ---
+  const isSubmittingRef = useRef(false); 
+  const isUnlockIntentRef = useRef(false);
   const vmContainerRef = useRef<HTMLDivElement>(null);
-  const lastActivityRef = useRef<number>(Date.now()); // Thời điểm thao tác cuối
+  const lastActivityRef = useRef<number>(Date.now()); 
   const router = useRouter();
 
   // ==============================
@@ -44,8 +46,13 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
   // ==============================
 
   const logActivity = async (action: string, details: string = "") => {
-    // Không ghi log nếu đang trong quy trình nộp bài (trừ log SUBMIT chính nó)
+    // Rule 1: Nếu đang nộp bài -> Không ghi log gì nữa (trừ SUBMIT)
     if (isSubmittingRef.current && action !== 'SUBMIT') return;
+
+    // Rule 2: [MỚI] Nếu đang bị phạt (Violation) -> Không ghi log ACTIVE/Heartbeat
+    // Chỉ cho phép ghi log VIOLATION (lần đầu) hoặc VIOLATION_RESOLVED
+    if (violation && action === 'ACTIVE') return;
+    
     try {
       await api.post('/monitoring/log', {
         examId, userId, action, 
@@ -55,23 +62,34 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
     } catch (e) { console.error("Log failed:", e); }
   };
 
-  // Hàm được gọi từ GuacamoleDisplay mỗi khi có thao tác chuột/phím
   const handleUserActivity = () => { lastActivityRef.current = Date.now(); };
 
-  // LOGIC NỘP BÀI & THU HỒI VM NGAY LẬP TỨC
-  const handleSubmitExam = async (reason?: string) => {
-    isSubmittingRef.current = true; // [QUAN TRỌNG] Bật cờ để chặn mọi log vi phạm sau thời điểm này
+  // --- LOGIC NỘP BÀI ---
+  const handleFinalSubmit = async (reason?: string) => {
+    if (isProcessing) return; 
     
-    logActivity('SUBMIT', reason || 'Nộp bài chủ động');
-
-    // Gọi API Backend để thu hồi VM NGAY
-    try { await api.post(`/exams/${examId}/finish`); } catch (e) { console.error("Finish API error:", e); }
-
-    if (reason) alert(reason);
+    setIsProcessing(true); 
+    isSubmittingRef.current = true; // Bật cờ chặn log vi phạm ngay
     
-    // Dọn dẹp và thoát
-    if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
-    if (document.exitPointerLock) document.exitPointerLock();
+    const submitReason = reason || 'Nộp bài chủ động';
+    
+    // Gửi log nộp bài
+    await logActivity('SUBMIT', submitReason);
+
+    try {
+        // Gọi API thu hồi máy và CHỜ nó chạy xong
+        await api.post(`/exams/${examId}/finish`);
+        console.log("VM revoked successfully");
+    } catch (e) { 
+        console.error("Finish API error:", e); 
+    }
+
+    // Clean up fullscreen/pointerlock
+    try {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      if (document.exitPointerLock) document.exitPointerLock();
+    } catch (e) {}
+
     router.push('/dashboard'); 
   };
 
@@ -79,7 +97,6 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
   // 2. EFFECTS: TIMERS & HEARTBEAT
   // ==============================
 
-  // Init & Cleanup
   useEffect(() => {
     logActivity('JOIN', 'Truy cập vào phòng thi');
     const handleUnload = () => {
@@ -89,24 +106,23 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
     };
     window.addEventListener('beforeunload', handleUnload);
 
-    // [FIX HEARTBEAT] Gửi tín hiệu ACTIVE mỗi phút nếu có thao tác
+    // Heartbeat chỉ chạy khi KHÔNG CÓ VI PHẠM (!violation)
     const heartbeatInterval = setInterval(() => {
-       if (hasStarted && !isSubmittingRef.current && Date.now() - lastActivityRef.current < 60000) {
+       if (hasStarted && !isSubmittingRef.current && !violation && Date.now() - lastActivityRef.current < 60000) {
            logActivity('ACTIVE', 'Heartbeat signal (User active)');
        }
     }, 60000);
 
     return () => { window.removeEventListener('beforeunload', handleUnload); clearInterval(heartbeatInterval); };
-  }, [hasStarted]);
+  }, [hasStarted, violation]); 
 
-  // Đồng hồ đếm ngược
   useEffect(() => {
     if (!hasStarted) return;
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 0) {
           clearInterval(timer);
-          handleSubmitExam("Hết giờ làm bài! Hệ thống tự động nộp.");
+          handleFinalSubmit("Hết giờ làm bài! Hệ thống tự động nộp."); // Tự nộp khi hết giờ
           return 0;
         }
         return prev - 1;
@@ -127,57 +143,56 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
   };
 
   const resolveViolation = async () => {
+      // Ghi log xác nhận đã giải quyết vi phạm
+      await logActivity('VIOLATION_RESOLVED', `Thí sinh đã quay lại làm bài (Đã hiểu lỗi: ${violation})`);
       setViolation(null);
       isUnlockIntentRef.current = false;
-      await startExamSession(); // Khóa lại ngay
+      await startExamSession(); 
   };
 
   useEffect(() => {
-    // Xử lý phím tắt
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isSubmittingRef.current) return;
-      // Chặn các phím chức năng của trình duyệt/hệ thống
+      
       if (['F12', 'F11', 'F5', 'ContextMenu', 'Meta'].includes(e.key) || (e.ctrlKey && e.key === 'r')) {
           e.preventDefault();
           if(e.key === 'Meta' || e.key === 'ContextMenu') triggerViolation('Sử dụng phím hệ thống (Windows/Menu)');
       }
-      // Alt + Enter hợp lệ
+
       if (e.altKey && e.key === 'Enter') {
-          isUnlockIntentRef.current = true; // Đánh dấu chủ động
+          isUnlockIntentRef.current = true;
           document.exitPointerLock();
           setIsLocked(false);
-          setShowExitConfirm(true);
+          setShowExitConfirm(true); // Hiện menu tạm dừng
           logActivity('UNLOCK_MOUSE', 'Chủ động mở menu (Alt+Enter)');
           return;
       }
-      // Alt + Tab vi phạm
+
       if (e.altKey && e.key === 'Tab') triggerViolation('Sử dụng Alt + Tab');
     };
 
-    // Xử lý mất tiêu điểm (Blur)
     const handleBlur = () => {
         if (!hasStarted || isSubmittingRef.current) return;
-        if (!isUnlockIntentRef.current && !showExitConfirm) triggerViolation('Mất tiêu điểm (Chuyển cửa sổ/Alt+Tab)');
+        triggerViolation('Mất tiêu điểm (Chuyển cửa sổ/Alt+Tab)');
     };
 
-    // Xử lý chuột rời vùng (Mouse Leave)
     const handleMouseLeave = () => {
         if (!hasStarted || isSubmittingRef.current) return;
-        if (!isUnlockIntentRef.current && !showExitConfirm && !isLocked) triggerViolation('Di chuyển chuột ra khỏi màn hình thi');
+        if (!isUnlockIntentRef.current && !showExitConfirm && !showSubmitConfirm && !isLocked) triggerViolation('Di chuyển chuột ra khỏi màn hình thi');
     };
 
-    // Xử lý trạng thái khóa chuột (Pointer Lock)
     const handlePointerLockChange = () => {
       if (document.pointerLockElement === vmContainerRef.current) {
-        setIsLocked(true); setShowExitConfirm(false);
+        setIsLocked(true); setShowExitConfirm(false); setShowSubmitConfirm(false);
       } else {
         setIsLocked(false);
-        // Nếu mất lock mà không phải do Alt+Enter -> Vi phạm
-        if (hasStarted && !isSubmittingRef.current && !isUnlockIntentRef.current) triggerViolation('Thoát khóa chuột trái phép');
+        // Nếu mất lock mà không phải do Alt+Enter (Menu) hoặc đang hiện Confirm Submit -> Vi phạm
+        if (hasStarted && !isSubmittingRef.current && !isUnlockIntentRef.current && !showSubmitConfirm) {
+            triggerViolation('Thoát khóa chuột trái phép');
+        }
       }
     };
 
-    // Xử lý toàn màn hình (Fullscreen)
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
         setIsFullscreen(false);
@@ -187,14 +202,12 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
       }
     };
 
-    // Attach listeners
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     window.addEventListener('blur', handleBlur);
     document.addEventListener('mouseleave', handleMouseLeave);
 
-    // Detach listeners
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('pointerlockchange', handlePointerLockChange);
@@ -202,7 +215,7 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
       window.removeEventListener('blur', handleBlur);
       document.removeEventListener('mouseleave', handleMouseLeave);
     };
-  }, [hasStarted, isLocked, showExitConfirm, violation]);
+  }, [hasStarted, isLocked, showExitConfirm, showSubmitConfirm, violation]);
 
   // ==============================
   // 4. HELPER FUNCTIONS
@@ -217,14 +230,33 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
     } catch (err) { alert("Hệ thống yêu cầu chế độ toàn màn hình để bắt đầu."); }
   };
 
-  const attemptLock = () => { if (!violation && !showExitConfirm) vmContainerRef.current?.requestPointerLock(); };
+  const attemptLock = () => {
+      // Chỉ cho phép lock lại nếu KHÔNG có vi phạm và KHÔNG đang hiện popup confirm
+      if (!violation && !showSubmitConfirm) {
+          vmContainerRef.current?.requestPointerLock();
+      }
+  };
 
-  // [FIX] Format HH:mm:ss chuẩn
   const formatTime = (totalSeconds: number) => {
     const h = Math.floor(totalSeconds / 3600);
     const m = Math.floor((totalSeconds % 3600) / 60);
     const s = totalSeconds % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  // --- Hàm mở Modal xác nhận nộp bài ---
+  const openSubmitConfirm = () => {
+      // Mở khóa chuột để user có thể click vào modal
+      if (document.pointerLockElement) document.exitPointerLock();
+      isUnlockIntentRef.current = true; // Đánh dấu là mở khóa hợp lệ
+      setShowSubmitConfirm(true);
+      setShowExitConfirm(false); // Ẩn menu tạm dừng nếu đang mở
+  };
+
+  const closeSubmitConfirm = () => {
+      setShowSubmitConfirm(false);
+      isUnlockIntentRef.current = false;
+      attemptLock(); // Khóa chuột lại
   };
 
   // ==============================
@@ -233,33 +265,26 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
   return (
     <div className="flex flex-col h-screen w-screen bg-[#090b10] text-gray-100 overflow-hidden select-none font-sans">
       
-      {/* --- HEADER (Glassmorphism) --- */}
+      {/* HEADER */}
       <div className="h-14 bg-[#0f1117]/90 backdrop-blur-md flex items-center justify-between px-6 border-b border-gray-800/50 z-50 shrink-0 shadow-[0_4px_20px_rgba(0,0,0,0.2)] absolute top-0 w-full">
-        
-        {/* Left Info Stats */}
-        <div className="flex items-center space-x-6">
-          
-          {/* Student Info & MSSV */}
+        <div className="flex items-center space-x-6 text-sm">
+          {/* Info Student */}
           <div className="flex items-center gap-3 group">
              <div className="p-2 rounded-lg bg-gray-800/50 border border-gray-700/50 group-hover:border-blue-500/30 transition-colors">
-                {/* Icon User */}
                 <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
              </div>
              <div className="flex flex-col">
                <span className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Thí sinh</span>
                <div className="flex items-baseline gap-2">
                   <span className="text-sm font-bold text-gray-100">{studentInfo.name}</span>
-                  <span className="text-xs text-gray-400 font-mono">({studentInfo.username})</span> {/* [FIX] Hiện MSSV */}
+                  <span className="text-xs text-gray-400 font-mono">({studentInfo.username})</span>
                </div>
              </div>
           </div>
-
           <div className="h-8 w-[1px] bg-gray-800"></div>
-
-          {/* VM Info */}
+          {/* Info VM */}
           <div className="flex items-center gap-3 group hidden md:flex">
              <div className="p-2 rounded-lg bg-gray-800/50 border border-gray-700/50 group-hover:border-green-500/30 transition-colors">
-                {/* Icon Monitor/VM */}
                 <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
              </div>
              <div className="flex flex-col">
@@ -272,47 +297,46 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
           </div>
         </div>
 
-        {/* Right Timer */}
-        <div className="flex items-center gap-3">
+        {/* Timer & Nút Nộp Bài Nhanh */}
+        <div className="flex items-center gap-4">
+            {/* Nút Nộp bài nhanh trên Header */}
+            {hasStarted && (
+                <button 
+                    onClick={openSubmitConfirm}
+                    className="hidden md:flex bg-red-600/20 hover:bg-red-600/40 text-red-400 hover:text-white border border-red-800/50 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider items-center gap-2 transition-all"
+                >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                    Nộp Bài
+                </button>
+            )}
+
             <div className="text-right">
                 <span className="text-[10px] uppercase tracking-widest text-gray-500 block mb-0.5">Thời gian còn lại</span>
-                {/* [FIX] Format HH:mm:ss */}
                 <div className={`text-2xl font-mono font-bold tracking-wider ${timeLeft < 300 ? 'text-red-400 animate-pulse drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]' : 'text-white drop-shadow-[0_0_5px_rgba(255,255,255,0.3)]'}`}>
                     {formatTime(timeLeft)}
                 </div>
             </div>
-            <div className={`p-2 rounded-lg border ${timeLeft < 300 ? 'bg-red-900/20 border-red-800' : 'bg-gray-800/50 border-gray-700/50'}`}>
-                {/* Icon Clock */}
-                <svg className={`w-6 h-6 ${timeLeft < 300 ? 'text-red-400' : 'text-gray-300'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </div>
         </div>
       </div>
 
-      {/* --- MAIN VM CONTAINER --- */}
+      {/* --- VM CONTAINER --- */}
       <div 
         ref={vmContainerRef} 
         className={`flex-1 relative bg-black flex justify-center items-center overflow-hidden mt-14 group outline-none ${isLocked ? 'cursor-none' : ''}`} 
-        onClick={() => { if(hasStarted && !isLocked && !isSubmittingRef.current && !violation) attemptLock(); }} 
+        onClick={() => { if(hasStarted && !isLocked && !isSubmittingRef.current && !violation && !showSubmitConfirm) attemptLock(); }} 
       >
-        {/* Guacamole Screen with smooth blur/scale transition */}
-        <div className={`w-full h-full transition-all duration-500 ease-out ${violation || (!isFullscreen && hasStarted) || showExitConfirm ? 'blur-md scale-[0.98] opacity-40 grayscale' : 'scale-100 opacity-100 grayscale-0'}`}>
+        <div className={`w-full h-full transition-all duration-500 ease-out ${violation || (!isFullscreen && hasStarted) || showExitConfirm || showSubmitConfirm ? 'blur-md scale-[0.98] opacity-40 grayscale' : 'scale-100 opacity-100 grayscale-0'}`}>
            <GuacamoleDisplay token={token} isLocked={isLocked} onActivity={handleUserActivity} />
         </div>
-
-        {/* ========================================= */}
-        {/* OVERLAYS (MODALS & ALERTS) */}
-        {/* ========================================= */}
 
         {/* 1. START SCREEN */}
         {!hasStarted && (
              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#090b10]/80 backdrop-blur-sm p-6">
+                {/* ... (Giữ nguyên code màn hình Start) ... */}
                 <div className="bg-[#161b22] p-8 rounded-2xl border border-gray-700/50 shadow-2xl text-center max-w-lg relative overflow-hidden">
-                    {/* Decor Background */}
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-cyan-500"></div>
-                    
                     <div className="mb-6 flex justify-center">
                         <div className="p-4 bg-blue-900/20 rounded-full border border-blue-500/30">
-                             {/* Icon Play/Start */}
                             <svg className="w-10 h-10 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         </div>
                     </div>
@@ -323,7 +347,6 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
                     </p>
                     <button onClick={startExamSession} className="w-full py-3 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold rounded-xl shadow-lg hover:shadow-blue-500/25 transition-all flex items-center justify-center gap-2">
                         <span>BẮT ĐẦU NGAY</span>
-                         {/* Icon Arrow Right */}
                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
                     </button>
                     <div className="mt-6 text-xs text-gray-500 flex justify-center items-center gap-2 bg-gray-800/50 py-2 rounded-lg">
@@ -334,16 +357,14 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
              </div>
         )}
 
-        {/* 2. VIOLATION ALERT (Red Zone) */}
+        {/* 2. VIOLATION ALERT */}
         {violation && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-red-950/90 backdrop-blur-md p-10 animate-in zoom-in duration-300">
+            {/* ... (Giữ nguyên code Alert Violation) ... */}
             <div className="bg-[#1a0505] border-2 border-red-600/80 p-10 rounded-[2rem] shadow-[0_0_100px_rgba(220,38,38,0.4)] max-w-2xl text-center relative overflow-hidden">
-                {/* Background Pulse */}
                 <div className="absolute inset-0 bg-red-600/10 animate-pulse z-0"></div>
-                
                 <div className="relative z-10">
                     <div className="inline-flex p-5 rounded-full bg-red-600/20 mb-6 border border-red-500/50 shadow-[0_0_30px_rgba(220,38,38,0.3)]">
-                        {/* Icon Warning Triangle Huge */}
                         <svg className="w-20 h-20 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
                     </div>
                     <h1 className="text-4xl font-black text-red-100 mb-2 uppercase tracking-wider drop-shadow-lg">Phát hiện vi phạm</h1>
@@ -354,11 +375,7 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
                         <p className="text-xl text-red-100 font-bold">"{violation}"</p>
                     </div>
 
-                    <button 
-                      onClick={resolveViolation}
-                      className="px-8 py-4 bg-red-600 hover:bg-red-500 text-white font-bold text-lg rounded-xl shadow-lg hover:shadow-red-500/40 transition-all w-full flex items-center justify-center gap-3 active:scale-95"
-                    >
-                      {/* Icon Refresh/Return */}
+                    <button onClick={resolveViolation} className="px-8 py-4 bg-red-600 hover:bg-red-500 text-white font-bold text-lg rounded-xl shadow-lg hover:shadow-red-500/40 transition-all w-full flex items-center justify-center gap-3 active:scale-95">
                       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                       ĐÃ HIỂU VÀ QUAY LẠI THI
                     </button>
@@ -367,18 +384,55 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
           </div>
         )}
 
-        {/* 3. PAUSE MENU (Alt+Enter) */}
-        {showExitConfirm && !violation && (
+        {/* 3. CONFIRM SUBMIT MODAL [MỚI] */}
+        {showSubmitConfirm && !violation && (
+            <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center bg-[#090b10]/90 backdrop-blur-md animate-in fade-in zoom-in duration-200">
+                <div className="bg-[#161b22] border border-blue-500/50 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center relative overflow-hidden">
+                    {/* Decor lines */}
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400"></div>
+                    <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-blue-500/10 rounded-full blur-2xl"></div>
+
+                    <div className="mb-6 inline-flex p-4 rounded-full bg-blue-500/10 border border-blue-500/30">
+                        <svg className="w-12 h-12 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+
+                    <h2 className="text-2xl font-bold text-white mb-2">Xác nhận nộp bài?</h2>
+                    <p className="text-gray-400 mb-8 text-sm">
+                        Bạn có chắc chắn muốn nộp bài và kết thúc phiên thi ngay bây giờ không? Hành động này không thể hoàn tác.
+                    </p>
+
+                    <div className="flex gap-3">
+                        <button 
+                            onClick={closeSubmitConfirm}
+                            className="flex-1 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 font-bold rounded-xl transition-all"
+                        >
+                            Hủy bỏ
+                        </button>
+                        <button 
+                            onClick={() => handleFinalSubmit("Nộp bài chủ động.")}
+                            disabled={isProcessing}
+                            className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center gap-2"
+                        >
+                            {isProcessing ? (
+                                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            ) : (
+                                "NỘP BÀI NGAY"
+                            )}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* 4. PAUSE MENU (Alt+Enter) */}
+        {showExitConfirm && !violation && !showSubmitConfirm && (
           <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#090b10]/80 backdrop-blur-md animate-in fade-in duration-200">
-            {/* Backdrop Click to Resume */}
             <div className="absolute inset-0" onClick={attemptLock}></div>
-            
             <div className="z-[51] bg-[#161b22] p-6 rounded-2xl border border-gray-700/50 shadow-2xl text-center min-w-[380px] relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gray-700 rounded-t-2xl"></div>
               
               <div className="mb-4 flex justify-center">
                  <div className="p-3 bg-gray-800/50 rounded-full border border-gray-700">
-                     {/* Icon Pause/Lock Open */}
                     <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 21.75h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" /></svg>
                  </div>
               </div>
@@ -388,14 +442,17 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
               
               <div className="space-y-3">
                 <button onClick={attemptLock} className="w-full py-3 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-white font-semibold rounded-lg transition-all flex items-center justify-center gap-2">
-                  {/* Icon Play/Resume */}
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   Quay lại làm bài
                 </button>
-                <button onClick={() => handleSubmitExam("Xác nhận nộp bài.")} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg shadow-lg hover:shadow-blue-500/20 transition-all flex items-center justify-center gap-2">
-                  {/* Icon Check/Submit */}
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  NỘP BÀI & KẾT THÚC
+                
+                {/* Nút này sẽ mở Modal xác nhận thay vì submit luôn */}
+                <button 
+                  onClick={openSubmitConfirm} 
+                  className={`w-full py-3 font-bold rounded-lg shadow-lg transition-all flex items-center justify-center gap-2 text-white bg-blue-600 hover:bg-blue-500 hover:shadow-blue-500/20`}
+                >
+                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                   NỘP BÀI & KẾT THÚC
                 </button>
               </div>
               

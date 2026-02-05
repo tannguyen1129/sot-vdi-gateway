@@ -38,6 +38,9 @@ export class User {
   @Column({ nullable: true })
   className: string; // Lớp (cho sinh viên)
 
+  @Column({ nullable: true })
+  department: string;
+
   @CreateDateColumn()
   createdAt: Date;
 }

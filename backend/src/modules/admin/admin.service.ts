@@ -22,33 +22,48 @@ export class AdminService {
     let countUpdate = 0;
 
     for (const row of data as any[]) {
+      // 1. Mapping các cột cơ bản (thêm nhiều key để user dễ nhập file excel)
       const mssv = row['mssv'] || row['username'] || row['User Name'] || row['Student ID'] || row['User ID'];
       const hoTen = row['ho_ten'] || row['fullName'] || row['Full Name'] || row['Name'] || row['Họ Tên'];
       const lop = row['lop'] || row['className'] || row['Class Name'] || row['Class'] || 'K14-CNTT';
       const matKhau = row['mat_khau'] || row['password'] || row['Password'] || '123456';
+
+      // 2. [MỚI] Mapping cột Khoa / Trường / Đơn vị
+      // Hệ thống sẽ tự tìm cột có tên 'khoa', 'truong', 'department', 'DonVi'...
+      const khoa = row['khoa'] || row['truong'] || row['don_vi'] || row['department'] || row['Department'] || row['Khoa'] || row['Trường'] || row['Đơn vị'];
 
       if (!mssv) continue;
 
       const user = await this.userRepo.findOne({ where: { username: mssv.toString().trim() } });
       
       if (user) {
+        // --- LOGIC CẬP NHẬT (UPDATE) ---
         user.password = matKhau.toString().trim();
         if (hoTen) user.fullName = hoTen.toString().trim();
-        user.className = lop.toString().trim();
+        if (lop) user.className = lop.toString().trim();
+        
+        // [MỚI] Cập nhật thông tin Khoa nếu có trong file Excel
+        if (khoa) user.department = khoa.toString().trim();
+
         await this.userRepo.save(user);
         countUpdate++;
       } else {
+        // --- LOGIC TẠO MỚI (CREATE) ---
         await this.userRepo.save({
           username: mssv.toString().trim(),
           password: matKhau.toString().trim(),
           fullName: hoTen ? hoTen.toString().trim() : `Sinh viên ${mssv}`,
-          className: lop.toString().trim(),
-          role: UserRole.STUDENT
+          className: lop ? lop.toString().trim() : '',
+          department: khoa ? khoa.toString().trim() : null,
+          
+          role: UserRole.STUDENT,
+          isActive: true // Mặc định kích hoạt
         });
         countNew++;
       }
     }
-    return { message: `Xử lý xong: Thêm mới ${countNew}, Cập nhật ${countUpdate} sinh viên.` };
+    
+    return { message: `Xử lý xong: Thêm mới ${countNew}, Cập nhật ${countUpdate} tài khoản.` };
   }
 
   // ==================================================================

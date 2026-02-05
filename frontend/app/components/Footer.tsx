@@ -79,7 +79,7 @@ export default function Footer() {
                 Ban Tổ chức các Kỳ thi Olympic UMT
               </p>
               <p className="text-slate-400 text-xs">
-                Khoa Công Nghệ, Trường Đại học Quản lý và Công nghệ Thành phố Hồ Chí Minh
+                Khoa Công Nghệ, Phòng 508, Tòa nhà Sáng tạo, Trường Đại học Quản lý và Công nghệ Thành phố Hồ Chí Minh
               </p>
               
               <div className="flex gap-3 mt-4 items-start">

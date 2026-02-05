@@ -6,372 +6,268 @@ import Guacamole from "guacamole-common-js";
 // --- Types & Interfaces ---
 interface GuacamoleDisplayProps {
   token: string | null;
-  isLocked?: boolean; // Nhận trạng thái lock từ component cha
-  onActivity?: () => void; // [MỚI] Hàm callback báo hiệu người dùng đang thao tác
+  isLocked?: boolean; 
+  onActivity?: () => void; 
 }
 
 // --- Helper Functions ---
-
-/**
- * Làm tròn kích thước để tránh mờ chữ và giảm tải việc resize liên tục
- */
-function normalizeSize(value: number, multiple = 4, min = 100) {
-  const v = Number(value);
-  if (!Number.isFinite(v)) return min;
-  const i = Math.max(min, Math.floor(v));
-  return i - (i % multiple);
-}
-
-/**
- * Tạo URL WebSocket dựa trên domain hiện tại
- */
 function buildWsCandidates(): string[] {
   if (typeof window === "undefined") return [];
   const loc = window.location;
   const wsProto = loc.protocol === "https:" ? "wss:" : "ws:";
-  // Kết nối vào path /guaclite đã cấu hình ở Nginx
   return [`${wsProto}//${loc.host}/guaclite`];
 }
 
-/**
- * Giới hạn giá trị trong khoảng min-max
- */
-function clampInt(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+// Hàm kẹp giá trị để chuột không chạy ra khỏi màn hình
+function clamp(val: number, min: number, max: number) {
+    return Math.min(Math.max(val, min), max);
 }
 
-// --- Main Component ---
-
 export default function GuacamoleDisplay({ token, isLocked = false, onActivity }: GuacamoleDisplayProps) {
-  // Refs DOM & Guacamole Client
+  // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const displayMountRef = useRef<HTMLDivElement>(null);
   const clientRef = useRef<any>(null);
   
-  // Ref lưu trạng thái kết nối để truy cập tức thời trong event listener
-  const stateRef = useRef<number>(0); 
-
-  // Chuột ảo (Dùng cho chế độ Pointer Lock)
-  const virtualMouse = useRef({ x: 0, y: 0 });
-
-  // State React
+  // States
   const [status, setStatus] = useState<string>("INITIALIZING");
-  
-  // Reconnect logic
-  const wsCandidates = useMemo(() => buildWsCandidates(), []);
-  const wsIndexRef = useRef<number>(0);
-  const reconnectTimerRef = useRef<any>(null);
-  const reconnectAttemptRef = useRef<number>(0);
+  const [hasDimensions, setHasDimensions] = useState(false); 
 
-  // --- [MỚI] Helper Activity Debounce ---
-  // Giúp hạn chế việc gọi callback quá nhiều lần trong 1 giây
+  // Mutable Refs 
+  const stateRef = useRef<number>(0); 
+  
+  // [FIX QUAN TRỌNG] Ref theo dõi tọa độ chuột ảo khi bị khóa
+  const virtualMouse = useRef({ x: 0, y: 0 });
+  
+  // Activity Debounce
   const notifyActivity = useRef((() => {
     let lastCall = 0;
     return () => {
       const now = Date.now();
-      // Chỉ báo hoạt động tối đa 1 lần mỗi 2 giây để tối ưu hiệu năng
-      if (now - lastCall > 2000) { 
+      if (now - lastCall > 2000 && onActivity) { 
         lastCall = now;
-        if (onActivity) onActivity();
+        onActivity();
       }
     };
   })()).current;
 
-  // --- 1. Hàm lấy kích thước màn hình ---
-  const getBoxSize = () => {
-    const box = containerRef.current;
-    if (!box) return { w: 1024, h: 768, dpi: 96 };
-    const rect = box.getBoundingClientRect();
-    
-    // Nếu chưa render xong
-    if (rect.width === 0 || rect.height === 0) return { w: 1024, h: 768, dpi: 96 };
-
-    const w = normalizeSize(rect.width, 4, 640);
-    const h = normalizeSize(rect.height, 4, 480);
-    const dpi = 96; 
-    return { w, h, dpi };
-  };
-
-  // --- 2. Xử lý chuột khi bị KHÓA (Pointer Lock Logic) ---
+  // --- 1. THEO DÕI KÍCH THƯỚC ---
   useEffect(() => {
-    const handleLockedMouseMove = (e: MouseEvent) => {
-      // Chỉ chạy khi đang khóa chuột và đã kết nối
-      if (!isLocked || !clientRef.current) return;
+    if (!containerRef.current) return;
 
-      // [ACTIVITY] Báo hiệu có thao tác
-      notifyActivity();
-
-      const { w, h } = getBoxSize();
-
-      // Cộng dồn chuyển động (delta) vào tọa độ ảo
-      virtualMouse.current.x += e.movementX;
-      virtualMouse.current.y += e.movementY;
-
-      // Giới hạn chuột không chạy ra ngoài màn hình máy ảo
-      virtualMouse.current.x = clampInt(virtualMouse.current.x, 0, w);
-      virtualMouse.current.y = clampInt(virtualMouse.current.y, 0, h);
-
-      // Gửi tọa độ ảo đi (Chỉ gửi khi state === 3: CONNECTED)
-      try {
-        if (stateRef.current === 3) {
-            clientRef.current.sendMouseState({
-                x: virtualMouse.current.x,
-                y: virtualMouse.current.y,
-                left: (e.buttons & 1) === 1,
-                middle: (e.buttons & 4) === 4,
-                right: (e.buttons & 2) === 2,
-                up: false,
-                down: false,
-            });
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+            if (!hasDimensions) setHasDimensions(true);
+            
+            // Resize động nếu đang kết nối
+            if (clientRef.current && stateRef.current === 3) {
+                const w = Math.floor(entry.contentRect.width);
+                const h = Math.floor(entry.contentRect.height);
+                try { clientRef.current.sendSize(w, h); } catch {}
+            }
         }
-      } catch (err) {
-        // Ignored
       }
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [hasDimensions]); 
+
+  // --- 2. XỬ LÝ CHUỘT KHI BỊ KHÓA (POINTER LOCK FIX) ---
+  useEffect(() => {
+    // Hàm xử lý di chuyển chuột khi đang Lock
+    const handleLockedMouseMove = (e: MouseEvent) => {
+       // Chỉ chạy khi đang bị khóa và đã kết nối
+       if (!isLocked || !clientRef.current || stateRef.current !== 3) return;
+       notifyActivity();
+
+       // Lấy kích thước khung hình hiện tại
+       let width = 1024, height = 768;
+       if (containerRef.current) {
+           const rect = containerRef.current.getBoundingClientRect();
+           width = rect.width;
+           height = rect.height;
+       }
+
+       // [FIX] Cộng dồn chuyển động (movementX/Y) vào tọa độ ảo
+       virtualMouse.current.x += e.movementX;
+       virtualMouse.current.y += e.movementY;
+
+       // Giới hạn không cho chuột ảo chạy ra ngoài khung
+       virtualMouse.current.x = clamp(virtualMouse.current.x, 0, width);
+       virtualMouse.current.y = clamp(virtualMouse.current.y, 0, height);
+
+       // Gửi tọa độ đã tính toán lên Server Guacamole
+       try {
+           clientRef.current.sendMouseState({
+               x: virtualMouse.current.x,
+               y: virtualMouse.current.y,
+               left: (e.buttons & 1) === 1,
+               middle: (e.buttons & 4) === 4,
+               right: (e.buttons & 2) === 2,
+               up: false, 
+               down: false
+           });
+       } catch {}
     };
 
-    // Xử lý Click khi đang Lock
+    // Hàm xử lý Click khi đang Lock
     const handleLockedClick = (e: MouseEvent) => {
-        if (!isLocked || !clientRef.current) return;
-        notifyActivity(); // [ACTIVITY]
-
+        if (!isLocked || !clientRef.current || stateRef.current !== 3) return;
+        notifyActivity();
+        
         try {
-            if (stateRef.current === 3) {
-                clientRef.current.sendMouseState({
-                    x: virtualMouse.current.x,
-                    y: virtualMouse.current.y,
-                    left: (e.buttons & 1) === 1,
-                    middle: (e.buttons & 4) === 4,
-                    right: (e.buttons & 2) === 2,
-                    up: false,
-                    down: false,
-                });
-            }
+            // Gửi trạng thái click tại vị trí chuột ảo hiện tại
+            clientRef.current.sendMouseState({
+               x: virtualMouse.current.x,
+               y: virtualMouse.current.y,
+               left: (e.buttons & 1) === 1,
+               middle: (e.buttons & 4) === 4,
+               right: (e.buttons & 2) === 2,
+               up: false, 
+               down: false
+           });
         } catch {}
     };
 
+    // Đăng ký sự kiện khi chế độ Lock được bật
     if (isLocked) {
-      document.addEventListener("mousemove", handleLockedMouseMove);
-      document.addEventListener("mousedown", handleLockedClick);
-      document.addEventListener("mouseup", handleLockedClick);
+        document.addEventListener("mousemove", handleLockedMouseMove);
+        document.addEventListener("mousedown", handleLockedClick);
+        document.addEventListener("mouseup", handleLockedClick);
+        document.addEventListener("keydown", () => notifyActivity());
     }
-
     return () => {
-      document.removeEventListener("mousemove", handleLockedMouseMove);
-      document.removeEventListener("mousedown", handleLockedClick);
-      document.removeEventListener("mouseup", handleLockedClick);
+        document.removeEventListener("mousemove", handleLockedMouseMove);
+        document.removeEventListener("mousedown", handleLockedClick);
+        document.removeEventListener("mouseup", handleLockedClick);
+        document.removeEventListener("keydown", () => notifyActivity());
     };
-  }, [isLocked]); 
+  }, [isLocked]);
 
-
-  // --- 3. Quản lý Kết nối (Connection Lifecycle) ---
+  // --- 3. KẾT NỐI GUACAMOLE ---
   useEffect(() => {
-    let alive = true;
+    if (!token || !hasDimensions) return;
 
-    // Hàm dọn dẹp kết nối cũ
-    const hardCleanup = () => {
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = null;
-      }
-      try {
-        if (clientRef.current) {
-          clientRef.current.disconnect();
-        }
-      } catch {}
-      clientRef.current = null;
-      stateRef.current = 0; // Reset state
+    let cleanupFn = () => {};
 
-      // Xóa canvas cũ
-      try {
-        if (displayMountRef.current) {
-          displayMountRef.current.innerHTML = "";
-        }
-      } catch {}
-    };
+    const connect = () => {
+      if (clientRef.current) { try { clientRef.current.disconnect(); } catch {} }
+      if (displayMountRef.current) displayMountRef.current.innerHTML = "";
 
-    // Hàm lập lịch Reconnect
-    const scheduleReconnect = (reason: string) => {
-      if (!alive || !token) return;
-      const attempt = reconnectAttemptRef.current + 1;
-      reconnectAttemptRef.current = attempt;
-      const delay = Math.min(1000 + attempt * 1000, 5000); // Backoff: 2s, 3s, ... max 5s
-
-      setStatus(`RECONNECTING (${reason})...`);
-      
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = setTimeout(() => {
-        if (!alive) return;
-        hardCleanup();
-        connectWithIndex(wsIndexRef.current);
-      }, delay);
-    };
-
-    // Hàm Kết nối chính
-    const connectWithIndex = (index: number) => {
-      if (!alive || !token) return;
-
-      const url = wsCandidates[index] || wsCandidates[0];
-      wsIndexRef.current = index;
-
-      hardCleanup();
       setStatus("CONNECTING...");
 
-      // Khởi tạo Tunnel & Client
-      const tunnel = new (Guacamole as any).WebSocketTunnel(url);
+      const tunnel = new (Guacamole as any).WebSocketTunnel(buildWsCandidates()[0]);
       const client = new (Guacamole as any).Client(tunnel);
       clientRef.current = client;
 
-      // --- Error Handlers ---
-      tunnel.onerror = (err: any) => {
-        console.error("Tunnel Error:", err);
-        // Chỉ reconnect nếu chưa kết nối thành công
-        if (stateRef.current !== 3) scheduleReconnect("TUNNEL_ERROR");
+      client.onerror = (error: any) => {
+         console.error("Guac Client Error:", error);
+         setStatus(`ERROR: ${error.message || 'Unknown'}`);
       };
 
-      client.onerror = (err: any) => {
-        console.error("Client Error:", err);
-        if (stateRef.current !== 3) scheduleReconnect("CLIENT_ERROR");
-      };
-
-      // --- State Change Handler ---
       client.onstatechange = (state: number) => {
-        stateRef.current = state; // Cập nhật ref để dùng chỗ khác
-
-        if (state === 3) { // 3 = CONNECTED
-          setStatus("CONNECTED");
-          reconnectAttemptRef.current = 0;
-          
-          // Gửi size màn hình ngay lập tức
-          const { w, h, dpi } = getBoxSize();
-          try { client.sendSize(w, h, dpi); } catch {}
-
-          // Reset chuột ảo về giữa màn hình
-          virtualMouse.current = { x: w / 2, y: h / 2 };
-
-        } else if (state === 5) { // 5 = DISCONNECTED
-          scheduleReconnect("DISCONNECTED");
-        } else {
-           // Các trạng thái trung gian (Connecting, Waiting...)
-           const states = ["IDLE", "CONNECTING", "WAITING", "CONNECTED", "DISCONNECTING", "DISCONNECTED"];
-           setStatus(states[state] || `STATE_${state}`);
-        }
+         stateRef.current = state;
+         const stateText = { 0: "IDLE", 1: "CONNECTING", 2: "WAITING", 3: "CONNECTED", 4: "DISCONNECTING", 5: "DISCONNECTED" };
+         const sText = (stateText as any)[state] || `STATE_${state}`;
+         
+         if (state === 3) {
+             setStatus("CONNECTED");
+             // Gửi size màn hình ngay lập tức khi kết nối
+             if (containerRef.current) {
+                 const rect = containerRef.current.getBoundingClientRect();
+                 const w = Math.floor(rect.width);
+                 const h = Math.floor(rect.height);
+                 client.sendSize(w, h);
+                 // Reset chuột ảo về giữa màn hình
+                 virtualMouse.current = { x: w / 2, y: h / 2 };
+             }
+         } else if (state === 5) {
+             setStatus("DISCONNECTED");
+         } else {
+             setStatus(sText);
+         }
       };
 
-      // --- Setup Display (Canvas) ---
       const display = client.getDisplay();
       const displayEl = display.getElement();
       
-      // Style cho Canvas
-      displayEl.style.cursor = isLocked ? 'none' : 'default'; // Ẩn chuột thật nếu đang lock
-      displayEl.style.width = "100%";
-      displayEl.style.height = "100%";
-      displayEl.oncontextmenu = (e: any) => { e.preventDefault(); return false; }; // Chặn menu chuột phải
+      displayEl.style.position = 'absolute';
+      displayEl.style.top = '0';
+      displayEl.style.left = '0';
+      displayEl.style.width = '100%';
+      displayEl.style.height = '100%';
+      displayEl.style.zIndex = '10'; 
+      displayEl.style.cursor = isLocked ? 'none' : 'default';
+      displayEl.style.touchAction = 'none';
 
       if (displayMountRef.current) {
-        displayMountRef.current.innerHTML = "";
-        displayMountRef.current.appendChild(displayEl);
+          displayMountRef.current.appendChild(displayEl);
       }
 
-      // --- Input: Mouse (Chế độ thường - Không Lock) ---
+      // -- INPUT HANDLERS (Chỉ dùng khi KHÔNG KHÓA - Fallback) --
       const mouse = new (Guacamole as any).Mouse(displayEl);
       mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (s: any) => {
-        // Chỉ xử lý khi KHÔNG lock chuột
-        if (!isLocked && clientRef.current) {
-            notifyActivity(); // [ACTIVITY]
-            virtualMouse.current = { x: s.x, y: s.y }; // Đồng bộ vị trí
-            try {
-                // FIX LỖI 520: Chỉ gửi khi Connected
-                if (stateRef.current === 3) client.sendMouseState(s);
-            } catch {}
-        }
+          // Nếu đang locked thì logic ở trên xử lý, ở đây chỉ xử lý khi unlocked
+          if (!isLocked && clientRef.current) {
+              notifyActivity();
+              clientRef.current.sendMouseState(s);
+          }
       };
 
-      // --- Input: Keyboard (Toàn trang) ---
       const keyboard = new (Guacamole as any).Keyboard(document);
       keyboard.onkeydown = (keysym: any) => {
-         notifyActivity(); // [ACTIVITY]
-         try { if (stateRef.current === 3) client.sendKeyEvent(1, keysym); } catch {}
+          if (clientRef.current) {
+              notifyActivity();
+              clientRef.current.sendKeyEvent(1, keysym);
+          }
       };
       keyboard.onkeyup = (keysym: any) => {
-         try { if (stateRef.current === 3) client.sendKeyEvent(0, keysym); } catch {}
+          if (clientRef.current) {
+              clientRef.current.sendKeyEvent(0, keysym);
+          }
       };
 
-      // --- Thực hiện Connect ---
-      const { w, h, dpi } = getBoxSize();
+      // Connect Params
+      const rect = containerRef.current!.getBoundingClientRect();
+      const width = Math.floor(rect.width);
+      const height = Math.floor(rect.height);
+
       const params = new URLSearchParams({
         token,
-        width: String(w),
-        height: String(h),
-        dpi: String(dpi),
+        width: String(width),
+        height: String(height),
+        dpi: "96" 
       });
 
-      try {
-        client.connect(params.toString());
-      } catch (e) {
-        scheduleReconnect("CONNECT_EXCEPTION");
-      }
+      client.connect(params.toString());
+
+      cleanupFn = () => {
+          try { client.disconnect(); } catch {}
+          if (displayMountRef.current) displayMountRef.current.innerHTML = "";
+      };
     };
 
-    // Bắt đầu
-    if (token) {
-        connectWithIndex(0);
-    } else {
-        setStatus("NO_TOKEN");
-    }
+    connect();
 
-    return () => {
-        alive = false;
-        hardCleanup();
-    };
-  }, [token, wsCandidates]); // Dependency tối thiểu để tránh reconnect không cần thiết
+    return () => { cleanupFn(); };
+  }, [token, hasDimensions]); 
 
-
-  // --- 4. Xử lý Resize (Debounce) ---
-  useEffect(() => {
-    let resizeTimer: any;
-    const handleResize = () => {
-        if (resizeTimer) clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-            if (clientRef.current && stateRef.current === 3) {
-                const { w, h, dpi } = getBoxSize();
-                try { clientRef.current.sendSize(w, h, dpi); } catch {}
-            }
-        }, 200); // Đợi 200ms sau khi ngừng kéo cửa sổ
-    };
-
-    window.addEventListener("resize", handleResize);
-    return () => {
-        window.removeEventListener("resize", handleResize);
-        if (resizeTimer) clearTimeout(resizeTimer);
-    };
-  }, []);
-
-
-  // --- 5. Cập nhật Cursor khi Lock thay đổi ---
-  useEffect(() => {
-    const displayEl = displayMountRef.current?.firstChild as HTMLElement;
-    if (displayEl) {
-        displayEl.style.cursor = isLocked ? 'none' : 'default';
-    }
-  }, [isLocked]);
-
-
-  // --- Render ---
+  // --- 4. RENDER ---
   return (
     <div 
       ref={containerRef} 
-      className="w-full h-full bg-black relative overflow-hidden flex items-center justify-center select-none"
+      className="w-full h-full relative bg-black flex items-center justify-center overflow-hidden"
     >
-      {/* Loading / Status Overlay */}
       {status !== "CONNECTED" && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-gray-900 text-white p-4">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-cyan-500 mb-4 shadow-[0_0_15px_cyan]"></div>
-            <p className="font-mono text-sm tracking-wide">{status}</p>
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#090b10] text-gray-400">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mb-4"></div>
+            <p className="font-mono text-xs tracking-widest">{status}</p>
+            {!hasDimensions && <p className="text-[10px] mt-2 text-gray-600 animate-pulse">Waiting for container size...</p>}
         </div>
       )}
-
-      {/* Mount Point cho Guacamole Canvas */}
-      <div ref={displayMountRef} className="w-full h-full" />
+      <div ref={displayMountRef} className="w-full h-full absolute inset-0" />
     </div>
   );
 }
