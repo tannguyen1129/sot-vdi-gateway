@@ -1,15 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  reactStrictMode: false, // QUAN TRỌNG: Sửa true thành false
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: 'http://umt_backend:3000/:path*',
-      },
-    ];
-  },
+  // Quan trọng: Tắt Strict Mode để tránh lỗi connect 2 lần
+  reactStrictMode: false, 
+  
+  // XÓA HẾT PHẦN REWRITES, để trống hoặc xóa hàm async rewrites()
 };
 
 export default nextConfig;

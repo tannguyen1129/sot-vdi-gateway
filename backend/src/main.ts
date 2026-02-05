@@ -38,7 +38,7 @@ async function bootstrap() {
     log: {
       level: 'DEBUG'
     },
-    maxInactivityTime: 30000 
+    maxInactivityTime: 0
   };
 
   const guacCallbacks = {

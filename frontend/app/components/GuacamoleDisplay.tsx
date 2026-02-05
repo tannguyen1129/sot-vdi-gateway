@@ -12,7 +12,7 @@ interface GuacamoleDisplayProps {
  * ENV (optional)
  * - NEXT_PUBLIC_GUAC_WS_URL: full ws/wss url (vd: wss://domain.com/guaclite or ws://ip:3000/guaclite)
  * - NEXT_PUBLIC_GUAC_WS_BASE: base ws/wss/http/https (vd: wss://domain.com OR https://domain.com)
- *   -> sẽ nối thêm /guaclite
+ * -> sẽ nối thêm /guaclite
  */
 
 function toWsBase(base: string, fallbackProto: "ws" | "wss") {
@@ -24,26 +24,14 @@ function toWsBase(base: string, fallbackProto: "ws" | "wss") {
 }
 
 function buildWsCandidates(): string[] {
-  if (typeof window === "undefined") return ["ws://localhost:3000/guaclite"];
+  if (typeof window === "undefined") return [];
 
-  const wsProto: "ws" | "wss" = window.location.protocol === "https:" ? "wss" : "ws";
-
-  const envUrl = process.env.NEXT_PUBLIC_GUAC_WS_URL?.trim();
-  if (envUrl) return [envUrl];
-
-  const envBase = process.env.NEXT_PUBLIC_GUAC_WS_BASE?.trim();
-  if (envBase) {
-    const base = toWsBase(envBase, wsProto);
-    return [`${base}/guaclite`];
-  }
-
-  // Không có env: thử theo reverse proxy trước, nếu fail sẽ tự fallback sang :3000
-  const primary = `${wsProto}://${window.location.host}/guaclite`;
-  const fallback = `${wsProto}://${window.location.hostname}:3000/guaclite`;
-
-  // tránh duplicate nếu host đã là :3000
-  if (primary === fallback) return [primary];
-  return [primary, fallback];
+  const loc = window.location;
+  const wsProto = loc.protocol === "https:" ? "wss:" : "ws:";
+  
+  // Kết nối thẳng vào host hiện tại (cổng 80/443 do Nginx quản lý)
+  // Đường dẫn sẽ là ws://domain.com/guaclite
+  return [`${wsProto}//${loc.host}/guaclite`];
 }
 
 function clampInt(n: number, min: number, max: number) {
@@ -118,9 +106,16 @@ export default function GuacamoleDisplay({ token }: GuacamoleDisplayProps) {
 
     const getBoxSize = () => {
       const box = containerRef.current;
+      // Mặc định size chuẩn nếu chưa render xong
       if (!box) return { w: 1024, h: 768, dpi: 96 };
 
       const rect = box.getBoundingClientRect();
+      
+      // LOG DEBUG: Kiểm tra xem kích thước có bị 0 không
+      if (rect.width === 0 || rect.height === 0) {
+        console.warn("GuacamoleDisplay: Container size is 0!", rect);
+      }
+
       const w = normalizeSize(rect.width, 4, 640);
       const h = normalizeSize(rect.height, 4, 480);
       const dpi = clampInt(Math.floor((window.devicePixelRatio || 1) * 96), 96, 192);
@@ -401,7 +396,8 @@ export default function GuacamoleDisplay({ token }: GuacamoleDisplayProps) {
   }, [token, wsCandidates]);
 
   return (
-    <div ref={containerRef} className="w-full h-full bg-black relative overflow-hidden">
+    // FIX QUAN TRỌNG: Đổi h-full thành h-screen để ép buộc hiển thị nếu thẻ cha không có height
+    <div ref={containerRef} className="w-full h-screen bg-black relative overflow-hidden">
       {!isConnected && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-900/90 text-white z-50">
           <div className="text-center px-6">

@@ -1,40 +1,45 @@
-// backend/src/modules/vdi/vdi.service.ts
-
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Vm } from '../../entities/vm.entity';
 import * as crypto from 'crypto';
+
+// Giả sử bạn có ProxmoxService để gọi API tắt máy (Nếu chưa có thì cần tạo)
+// import { ProxmoxService } from '../proxmox/proxmox.service'; 
 
 @Injectable()
 export class VdiService {
   private readonly guacCypher = 'AES-256-CBC';
   private readonly guacKey = process.env.GUAC_CRYPT_KEY || 'MySuperSecretKeyForEncryption123';
 
+  // Biến lưu trữ instance Guacamole Server (Cần được set từ main.ts hoặc module khác)
+  public static guacamoleServerInstance: any = null;
+
   constructor(
     @InjectRepository(Vm)
     private vmRepo: Repository<Vm>,
+    // @Inject(ProxmoxService) private proxmoxService: ProxmoxService, // Uncomment nếu đã có service này
   ) {}
 
   async allocateVm(userId: number): Promise<Vm> {
     let vm = await this.vmRepo.findOne({ where: { allocatedToUserId: userId } });
     if (vm) return vm;
 
-    vm = await this.vmRepo.findOne({ 
-        where: { isAllocated: false },
-        order: { port: 'ASC' }
+    vm = await this.vmRepo.findOne({
+      where: { isAllocated: false },
+      order: { port: 'ASC' },
     });
-    
+
     if (!vm) throw new NotFoundException('Hết máy ảo.');
 
     vm.isAllocated = true;
     vm.allocatedToUserId = userId;
     await this.vmRepo.save(vm);
-    
+
     return vm;
   }
 
-  generateGuacamoleToken(vm: Vm): string {
+generateGuacamoleToken(vm: Vm): string {
     const connectionParams = {
       connection: {
         type: 'rdp',
@@ -43,19 +48,32 @@ export class VdiService {
           port: String(vm.port),
           username: vm.username,
           password: vm.password,
+          
           security: 'nla',
-          'ignore-cert': 'true',
-          'enable-keep-alive': 'true',
-          'resize-method': 'display-update',
-          dpi: '96',
-          'server-layout': 'en-us-qwerty',
-          'disable-wallpaper': 'true',
-          'disable-theming': 'true',
+          'ignore-cert': true,
 
-          'enable-wallpaper': 'false',
-          'enable-theming': 'false',
-          'enable-font-smoothing': 'false',
-          'enable-desktop-composition': 'false',
+          // ========================================================
+          // CẤU HÌNH FINAL (KHI ĐÃ CÓ NGINX)
+          // ========================================================
+          
+          'disable-gfx': false,       // BẬT GFX (Windows sẽ gửi luồng H.264)
+          'color-depth': 32,          // Màu đẹp nhất
+          'resize-method': 'display-update',
+
+          // 4. Bật full hiệu ứng đẹp
+          'enable-wallpaper': true,   
+          'enable-theming': true,
+          'enable-font-smoothing': true,
+          'enable-menu-animations': true,
+          'enable-desktop-composition': true,
+
+          // Tắt cache để tránh rác
+          'disable-bitmap-caching': true,
+          'disable-offscreen-caching': true,
+          'disable-glyph-caching': true,
+
+          dpi: 96,
+          'server-layout': 'en-us-qwerty',
         },
       },
     };
@@ -86,5 +104,32 @@ export class VdiService {
       vm.allocatedToUserId = null;
       await this.vmRepo.save(vm);
     }
+  }
+
+  // --- HÀM THU HỒI MÁY ẢO ---
+  async revokeVmConnection(userId: number) {
+    // 1. Tìm VM đang cấp cho User này
+    const vm = await this.vmRepo.findOne({ where: { allocatedToUserId: userId } });
+    
+    if (!vm) return; // User không có máy ảo nào
+
+    // 2. Ngắt kết nối Guacamole
+    // Lưu ý: GuacamoleLite nằm ở tầng Socket, Service này khó gọi trực tiếp nếu không dùng Singleton hoặc Global.
+    // Đây là cách đi đường vòng thông qua biến Static (hoặc bạn dùng Redis Pub/Sub để bắn sự kiện)
+    if (VdiService.guacamoleServerInstance) {
+        // Giả sử server có hàm closeConnection(clientIdentifier)
+        // Bạn cần implement logic map userId -> connectionId trong GuacamoleLite
+        console.log(`[VDI] Closing connection for User ${userId}`);
+        // VdiService.guacamoleServerInstance.closeConnection(userId); 
+    }
+
+    // 3. Gọi Proxmox API để tắt máy ảo (Stop VM)
+    if (vm.vmid) {
+       console.log(`[VDI] Stopping Proxmox VM ID: ${vm.vmid}`);
+       // await this.proxmoxService.stopVm(vm.vmid); // Uncomment khi có Proxmox Service
+    }
+
+    // 4. Giải phóng database
+    await this.releaseVm(userId);
   }
 }
