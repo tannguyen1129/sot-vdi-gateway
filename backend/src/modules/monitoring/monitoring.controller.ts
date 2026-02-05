@@ -1,12 +1,15 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ExamLog } from '../../entities/exam-log.entity';
 import { User } from '../../entities/user.entity';
 import { Vm } from '../../entities/vm.entity';
+import { MonitoringService } from './monitoring.service';
+
 
 @Controller('monitoring')
 export class MonitoringController {
+  monitoringService: any;
   constructor(
     @InjectRepository(ExamLog) private logRepo: Repository<ExamLog>,
     @InjectRepository(User) private userRepo: Repository<User>,
@@ -81,4 +84,18 @@ export class MonitoringController {
 
     return liveData;
   }
+
+  // 4. Lấy full logs để export Excel
+  @Get(':examId/all')
+  async getAllLogs(@Param('examId') examId: string) {
+    return this.monitoringService.getLogsByExam(+examId);
+  }
+
+  // 5. Xóa toàn bộ logs của kỳ thi
+  @Delete(':examId/clear')
+  async clearLogs(@Param('examId') examId: string) {
+    await this.monitoringService.clearLogsByExam(+examId);
+    return { message: 'Đã xóa toàn bộ nhật ký giám sát.' };
+  }
+  
 }

@@ -17,23 +17,16 @@ export default function LoginPage() {
     setError('');
     
     try {
-      // 1. Gọi API
       const res = await api.post('/auth/login', { username, password });
-      
-      // 2. Lưu Storage
       localStorage.setItem('user', JSON.stringify(res.data));
-
-      // 3. Phát tín hiệu cập nhật Navbar
       window.dispatchEvent(new Event('auth-change'));
 
-      // 4. Chuyển hướng
       if (res.data.role === 'ADMIN') {
         router.push('/admin');
       } else {
         router.push('/dashboard');
       }
     } catch (err: any) {
-      // Xử lý lỗi hiển thị đẹp hơn
       const msg = err.response?.data?.message || 'Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.';
       setError(msg);
     } finally {
@@ -54,19 +47,21 @@ export default function LoginPage() {
         
         {/* Header Section */}
         <div className="p-8 pb-0 text-center">
-           {/* Logos */}
-           <div className="flex justify-center items-center gap-4 mb-6">
-              <img src="/logosot.png" alt="SOT" className="h-10 w-auto object-contain" />
-              <div className="h-8 w-[1px] bg-slate-300"></div>
-              <img src="/sot-vdi.png" alt="VDI" className="h-8 w-auto object-contain" />
+           {/* LOGO DUY NHẤT - CĂN GIỮA */}
+           <div className="flex justify-center mb-8">
+              <img 
+                src="/sot-vdi.png" 
+                alt="SOT VDI" 
+                className="h-14 w-auto object-contain drop-shadow-sm" 
+              />
            </div>
            
-           <h1 className="text-2xl font-black text-slate-800 uppercase tracking-tight">Cổng Đăng Nhập</h1>
+           <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Cổng Đăng Nhập</h1>
            <p className="text-slate-500 text-sm mt-2 font-medium">Hệ thống thi thực hành & VDI Gateway</p>
         </div>
 
         {/* Form Section */}
-        <div className="p-8">
+        <div className="p-8 pt-6">
           
           {/* Error Alert */}
           {error && (
@@ -101,7 +96,7 @@ export default function LoginPage() {
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Mật khẩu</label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <svg className="h-5 w-5 text-slate-400 group-focus-within:text-blue-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                  <svg className="h-5 w-5 text-slate-400 group-focus-within:text-blue-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
                 </div>
                 <input
                   type="password"
@@ -145,9 +140,9 @@ export default function LoginPage() {
 
       </div>
       
-      {/* Footer Info (Absolute Bottom) */}
-      <div className="absolute bottom-6 text-center w-full text-slate-400 text-xs">
-         &copy; 2026 SOT VDI Gateways. Powered by TechGenTeam.
+      {/* Footer Info */}
+      <div className="absolute bottom-6 text-center w-full text-slate-400 text-xs font-medium">
+         &copy; 2026 SOT VDI Gateways. Powered by TechGen.
       </div>
 
     </div>

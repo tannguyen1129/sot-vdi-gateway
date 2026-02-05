@@ -5,14 +5,15 @@ import { useParams, useRouter } from "next/navigation";
 import api from "./../../utils/axios";
 
 import ExamLobby from "./components/ExamLobby";
+// Import Interface StudentInfo để đảm bảo type-safe
 import ExamInterface, { StudentInfo } from "../../components/ExamInterface"; 
 
-// Interface cho dữ liệu phiên thi trả về từ Backend
+// Interface cho dữ liệu phiên thi trả về từ Backend API /join
 interface ExamSessionData {
   connectionToken: string;
   vmInfo: {
     ip: string;
-    username: string;
+    username: string; // [MỚI] Tên user của máy ảo (vd: Administrator, Lab01)
   };
 }
 
@@ -30,10 +31,10 @@ export default function ExamPage() {
   const [user, setUser] = useState<any>(null);
   const [exam, setExam] = useState<any>(null);
   
-  // Lưu session gồm Token và Info máy ảo
+  // Lưu session gồm Token và Info máy ảo sau khi Join thành công
   const [examSession, setExamSession] = useState<ExamSessionData | null>(null);
   
-  const [clientIp, setClientIp] = useState<string>("Đang lấy IP..."); // IP máy thí sinh
+  const [clientIp, setClientIp] = useState<string>("Đang lấy IP...");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isReady, setIsReady] = useState(false);
@@ -58,7 +59,7 @@ export default function ExamPage() {
     let cancelled = false;
     const bootstrap = async () => {
       try {
-        // Kiểm tra User đăng nhập
+        // Kiểm tra User đăng nhập từ LocalStorage
         const userStr = localStorage.getItem("user");
         if (!userStr) {
           router.push("/login");
@@ -79,7 +80,7 @@ export default function ExamPage() {
           setIsReady(true);
         }
       } catch (err) {
-        // alert("Không tìm thấy kỳ thi hoặc bạn không có quyền truy cập!");
+        // Nếu lỗi (vd: ko tìm thấy exam), quay về dashboard
         router.push("/dashboard");
       }
     };
@@ -95,7 +96,6 @@ export default function ExamPage() {
 
     try {
         // Gọi API Backend: POST /exams/:id/join
-        // Backend cần trả về: { connectionToken: "...", vmInfo: { ip: "...", username: "..." } }
         const res = await api.post(`/exams/${examId}/join`, { 
             userId: user.id, 
             accessCode 
@@ -104,7 +104,8 @@ export default function ExamPage() {
         if (res.data?.connectionToken) {
             setExamSession({
                 connectionToken: res.data.connectionToken,
-                vmInfo: res.data.vmInfo || { ip: "Unknown", username: "Unknown" } // Fallback nếu backend chưa update
+                // [QUAN TRỌNG] Lấy cả Username máy ảo từ response
+                vmInfo: res.data.vmInfo || { ip: "Unknown", username: "Unknown" }
             });
         }
     } catch (err: any) {
@@ -135,14 +136,26 @@ export default function ExamPage() {
     );
   }
 
-  // TRƯỜNG HỢP 1: ĐÃ CÓ SESSION -> VÀO GIAO DIỆN THI (ANTI-CHEAT MODE)
+  // TRƯỜNG HỢP 1: ĐÃ CÓ SESSION (Đã Join thành công) -> VÀO GIAO DIỆN THI
   if (examSession && user && exam) {
+    
+    // Tạo object StudentInfo đầy đủ các trường mới
     const studentInfo: StudentInfo = {
         name: user.fullName || user.username,
-        username: user.username,
+        username: user.username, // MSSV
+        className: user.className || "N/A", // Lớp
+        
+        // [MỚI] Trường Khoa/Trường (Lấy từ User Database)
+        // Nếu user chưa cập nhật thì hiển thị mặc định
+        department: user.department || "Khoa CNTT", 
+        
         clientIp: clientIp,
+        
         vmIp: examSession.vmInfo.ip,
+        
+        // [MỚI] Username máy ảo (Lấy từ kết quả Join)
         vmUsername: examSession.vmInfo.username,
+        
         timeLeft: calculateTimeLeft(exam.endTime)
     };
 
@@ -150,10 +163,8 @@ export default function ExamPage() {
       <ExamInterface 
         token={examSession.connectionToken} 
         studentInfo={studentInfo}
-        // --- [FIX LỖI 500] THÊM 2 DÒNG NÀY ---
         examId={exam.id}
         userId={user.id}
-        // ------------------------------------
       />
     );
   }

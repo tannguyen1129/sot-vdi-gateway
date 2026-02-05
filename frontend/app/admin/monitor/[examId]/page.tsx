@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import api from "./../../../utils/axios";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import * as XLSX from "xlsx"; // Import thư viện Excel
 
 // --- INTERFACES ---
 interface LiveStudent {
@@ -46,6 +47,10 @@ export default function ExamMonitorDetailPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'GRID' | 'LIST'>('GRID');
+  
+  // Loading states cho buttons
+  const [isExporting, setIsExporting] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   // --- FETCH DATA ---
   const fetchData = async () => {
@@ -73,7 +78,60 @@ export default function ExamMonitorDetailPage() {
     return () => clearInterval(interval);
   }, [examId, autoRefresh]);
 
-  // --- HELPER: STATUS STYLES (Cyberpunk / Tech Style) ---
+  // --- EXPORT HANDLER ---
+  const handleExport = async () => {
+    if (logs.length === 0) return alert("Không có dữ liệu để xuất!");
+    setIsExporting(true);
+
+    try {
+        // Gọi API lấy toàn bộ logs (không phân trang) để export đầy đủ
+        const res = await api.get(`/monitoring/${examId}/all`);
+        const fullLogs = res.data;
+
+        // Map dữ liệu sang format Excel
+        const dataToExport = fullLogs.map((log: any) => ({
+            "Thời gian": new Date(log.createdAt).toLocaleString('vi-VN'),
+            "MSSV": log.user?.username || "N/A",
+            "Họ tên": log.user?.fullName || "N/A",
+            "Hành động": log.action,
+            "Chi tiết": log.details,
+            "IP Máy": log.clientIp
+        }));
+
+        // Tạo Sheet & Workbook
+        const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "SystemLogs");
+
+        // Xuất file
+        XLSX.writeFile(workbook, `Logs_KyThi_${examId}_${new Date().getTime()}.xlsx`);
+    } catch (err) {
+        alert("Lỗi xuất file excel!");
+        console.error(err);
+    } finally {
+        setIsExporting(false);
+    }
+  };
+
+  // --- CLEAR LOGS HANDLER ---
+  const handleClearLogs = async () => {
+    const confirm = window.confirm("CẢNH BÁO NGUY HIỂM:\nBạn có chắc chắn muốn XÓA TOÀN BỘ logs của kỳ thi này không?\nHành động này KHÔNG THỂ hoàn tác!");
+    if (!confirm) return;
+
+    setIsClearing(true);
+    try {
+        await api.delete(`/monitoring/${examId}/clear`);
+        setLogs([]); // Xóa state ngay lập tức
+        alert("Đã xóa sạch nhật ký giám sát.");
+    } catch (err) {
+        alert("Lỗi khi xóa logs!");
+        console.error(err);
+    } finally {
+        setIsClearing(false);
+    }
+  };
+
+  // --- HELPER: STATUS STYLES ---
   const getCardStyle = (st: LiveStudent) => {
     if (st.isViolation) return "border-red-500 bg-red-950/30 shadow-[0_0_15px_rgba(239,68,68,0.5)]"; 
     if (!st.vm) return "border-slate-700 bg-slate-800/50 opacity-60 grayscale";
@@ -143,7 +201,7 @@ export default function ExamMonitorDetailPage() {
             <div className="flex items-center gap-3">
                <div className="flex bg-slate-900 rounded-lg p-1 border border-slate-800">
                   <button onClick={() => setViewMode('GRID')} className={`p-2 rounded transition-all ${viewMode==='GRID' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>
-                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
                   </button>
                   <button onClick={() => setViewMode('LIST')} className={`p-2 rounded transition-all ${viewMode==='LIST' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}>
                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="square" strokeLinejoin="miter" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -209,19 +267,50 @@ export default function ExamMonitorDetailPage() {
             
             {/* Header Logs */}
             <div className="bg-[#161b22] px-4 py-3 border-b border-gray-800 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+               
+               {/* Log Title */}
                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                  {/* Icon Terminal */}
                   <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 17l6-6-6-6M12 19h8" />
                   </svg>
-                  LIVE SYSTEM EVENTS
+                  LIVE EVENTS
                </span>
+
+               {/* Action Buttons Group */}
                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                  </span>
-                  <span className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-[10px] font-mono text-blue-400 font-bold">
+                  {/* Export Button */}
+                  <button 
+                    onClick={handleExport}
+                    disabled={isExporting || logs.length === 0}
+                    title="Export to Excel"
+                    className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 border border-transparent hover:border-blue-500/50 rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                     {isExporting ? (
+                        <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                     ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                     )}
+                  </button>
+
+                  {/* Clear Button */}
+                  <button 
+                    onClick={handleClearLogs}
+                    disabled={isClearing || logs.length === 0}
+                    title="Clear All Logs"
+                    className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/50 rounded transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                     {isClearing ? (
+                        <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                     ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                     )}
+                  </button>
+
+                  {/* Divider */}
+                  <div className="w-[1px] h-4 bg-gray-700 mx-1"></div>
+
+                  {/* Counter Badge */}
+                  <span className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-[10px] font-mono text-blue-400 font-bold min-w-[24px] text-center">
                     {logs.length}
                   </span>
                </div>
@@ -244,7 +333,6 @@ export default function ExamMonitorDetailPage() {
                       borderClass = 'border-l-2 border-red-600 bg-red-900/10';
                       bgHoverClass = 'hover:bg-red-900/20';
                       badgeClass = 'bg-red-950 text-red-400 border-red-900';
-                      // Icon Cảnh báo (Tam giác ! )
                       Icon = (
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -253,7 +341,6 @@ export default function ExamMonitorDetailPage() {
                   } else if (isSubmit) {
                       borderClass = 'border-l-2 border-blue-500 bg-blue-900/10';
                       badgeClass = 'bg-blue-950 text-blue-400 border-blue-900';
-                      // Icon Nộp bài (Check)
                       Icon = (
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -261,14 +348,12 @@ export default function ExamMonitorDetailPage() {
                       );
                   } else if (isJoin) {
                       badgeClass = 'bg-green-950 text-green-400 border-green-900';
-                      // Icon Join (Mũi tên vào)
                       Icon = (
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
                         </svg>
                       );
                   } else {
-                      // Icon Info (Chữ i)
                       Icon = (
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -282,7 +367,6 @@ export default function ExamMonitorDetailPage() {
                          {/* Dòng 1: Thời gian & IP */}
                          <div className="flex justify-between items-center mb-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
                             <span className="text-[10px] text-gray-500 flex items-center gap-1.5">
-                               {/* Icon Đồng hồ */}
                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                                </svg>
@@ -292,7 +376,6 @@ export default function ExamMonitorDetailPage() {
                                })}
                             </span>
                             <span className="text-[10px] text-blue-500/80 font-mono flex items-center gap-1">
-                               {/* Icon Network/Globe */}
                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
                                </svg>
@@ -314,10 +397,8 @@ export default function ExamMonitorDetailPage() {
                          {/* Dòng 3: Details */}
                          {log.details && (
                             <div className="text-gray-500 text-[11px] pl-2 ml-1 border-l border-gray-700 leading-tight flex gap-1.5 pt-0.5">
-                               {/* Icon Arrow Turn Right */}
                                <svg className="w-3 h-3 shrink-0 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" transform="scale(-1, 1) translate(-24, 0)" /> 
-                                  {/* Hack transform để quay mũi tên */}
                                </svg>
                                {log.details}
                             </div>
@@ -329,7 +410,6 @@ export default function ExamMonitorDetailPage() {
                {/* Empty State */}
                {logs.length === 0 && (
                   <div className="flex flex-col items-center justify-center h-40 text-gray-700 space-y-3 mt-10">
-                     {/* Icon Radar Scan */}
                      <svg className="w-12 h-12 animate-pulse text-gray-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
                      </svg>
