@@ -7,6 +7,7 @@ import Guacamole from "guacamole-common-js";
 interface GuacamoleDisplayProps {
   token: string | null;
   isLocked?: boolean; // Nhận trạng thái lock từ component cha
+  onActivity?: () => void; // [MỚI] Hàm callback báo hiệu người dùng đang thao tác
 }
 
 // --- Helper Functions ---
@@ -41,7 +42,7 @@ function clampInt(n: number, min: number, max: number) {
 
 // --- Main Component ---
 
-export default function GuacamoleDisplay({ token, isLocked = false }: GuacamoleDisplayProps) {
+export default function GuacamoleDisplay({ token, isLocked = false, onActivity }: GuacamoleDisplayProps) {
   // Refs DOM & Guacamole Client
   const containerRef = useRef<HTMLDivElement>(null);
   const displayMountRef = useRef<HTMLDivElement>(null);
@@ -61,6 +62,20 @@ export default function GuacamoleDisplay({ token, isLocked = false }: GuacamoleD
   const wsIndexRef = useRef<number>(0);
   const reconnectTimerRef = useRef<any>(null);
   const reconnectAttemptRef = useRef<number>(0);
+
+  // --- [MỚI] Helper Activity Debounce ---
+  // Giúp hạn chế việc gọi callback quá nhiều lần trong 1 giây
+  const notifyActivity = useRef((() => {
+    let lastCall = 0;
+    return () => {
+      const now = Date.now();
+      // Chỉ báo hoạt động tối đa 1 lần mỗi 2 giây để tối ưu hiệu năng
+      if (now - lastCall > 2000) { 
+        lastCall = now;
+        if (onActivity) onActivity();
+      }
+    };
+  })()).current;
 
   // --- 1. Hàm lấy kích thước màn hình ---
   const getBoxSize = () => {
@@ -82,6 +97,9 @@ export default function GuacamoleDisplay({ token, isLocked = false }: GuacamoleD
     const handleLockedMouseMove = (e: MouseEvent) => {
       // Chỉ chạy khi đang khóa chuột và đã kết nối
       if (!isLocked || !clientRef.current) return;
+
+      // [ACTIVITY] Báo hiệu có thao tác
+      notifyActivity();
 
       const { w, h } = getBoxSize();
 
@@ -114,6 +132,8 @@ export default function GuacamoleDisplay({ token, isLocked = false }: GuacamoleD
     // Xử lý Click khi đang Lock
     const handleLockedClick = (e: MouseEvent) => {
         if (!isLocked || !clientRef.current) return;
+        notifyActivity(); // [ACTIVITY]
+
         try {
             if (stateRef.current === 3) {
                 clientRef.current.sendMouseState({
@@ -257,6 +277,7 @@ export default function GuacamoleDisplay({ token, isLocked = false }: GuacamoleD
       mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (s: any) => {
         // Chỉ xử lý khi KHÔNG lock chuột
         if (!isLocked && clientRef.current) {
+            notifyActivity(); // [ACTIVITY]
             virtualMouse.current = { x: s.x, y: s.y }; // Đồng bộ vị trí
             try {
                 // FIX LỖI 520: Chỉ gửi khi Connected
@@ -268,6 +289,7 @@ export default function GuacamoleDisplay({ token, isLocked = false }: GuacamoleD
       // --- Input: Keyboard (Toàn trang) ---
       const keyboard = new (Guacamole as any).Keyboard(document);
       keyboard.onkeydown = (keysym: any) => {
+         notifyActivity(); // [ACTIVITY]
          try { if (stateRef.current === 3) client.sendKeyEvent(1, keysym); } catch {}
       };
       keyboard.onkeyup = (keysym: any) => {

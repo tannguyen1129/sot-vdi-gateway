@@ -204,35 +204,142 @@ export default function ExamMonitorDetailPage() {
             ))}
          </div>
 
-         {/* RIGHT: LOG TERMINAL (Chiếm 1/4) */}
-         <div className="lg:col-span-1 bg-black rounded-lg border border-slate-800 flex flex-col overflow-hidden shadow-2xl">
-            <div className="bg-slate-900 px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-               <span className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                  <span className="w-2 h-2 bg-slate-600 rounded-full"></span> SYSTEM LOGS
+         {/* PANEL BÊN PHẢI: LOG HỆ THỐNG (CONSOLE STYLE) */}
+        <div className="lg:col-span-1 bg-[#0f1117] rounded-xl border border-gray-800 flex flex-col overflow-hidden shadow-2xl h-[600px] lg:h-[calc(100vh-140px)]">
+            
+            {/* Header Logs */}
+            <div className="bg-[#161b22] px-4 py-3 border-b border-gray-800 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+               <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                  {/* Icon Terminal */}
+                  <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 17l6-6-6-6M12 19h8" />
+                  </svg>
+                  LIVE SYSTEM EVENTS
                </span>
-               <span className="text-[10px] font-mono text-slate-600">{logs.length} events</span>
+               <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-[10px] font-mono text-blue-400 font-bold">
+                    {logs.length}
+                  </span>
+               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 font-mono text-xs space-y-1 custom-scrollbar">
-               {logs.map((log) => (
-                  <div key={log.id} className="p-2 hover:bg-slate-900 rounded border border-transparent hover:border-slate-800 transition-colors group">
-                     <div className="flex gap-2 text-[10px] text-slate-500 mb-0.5">
-                        <span>[{new Date(log.createdAt).toLocaleTimeString()}]</span>
-                        <span className="text-blue-500 group-hover:underline cursor-pointer">{log.clientIp}</span>
-                     </div>
-                     <div className="flex gap-2">
-                        <span className={`font-bold ${log.action.includes('VIOLATION') ? 'text-red-500' : log.action === 'SUBMIT' ? 'text-blue-400' : 'text-emerald-500'}`}>
-                           {log.action}
-                        </span>
-                        <span className="text-slate-300 truncate">{log.user?.username}</span>
-                     </div>
-                     <div className="text-slate-500 pl-4 border-l border-slate-800 mt-1 italic text-[10px] truncate">
-                        {log.details}
-                     </div>
+
+            {/* Body Logs */}
+            <div className="flex-1 overflow-y-auto p-0 font-mono text-xs custom-scrollbar bg-[#0d1117]">
+               {logs.map((log) => {
+                  const isViolation = log.action.includes('VIOLATION');
+                  const isSubmit = log.action === 'SUBMIT';
+                  const isJoin = log.action === 'JOIN';
+                  
+                  // Config màu sắc & Icon
+                  let borderClass = 'border-l-2 border-transparent';
+                  let bgHoverClass = 'hover:bg-white/5';
+                  let badgeClass = 'bg-gray-800 text-gray-400 border-gray-700';
+                  let Icon = null;
+
+                  if (isViolation) {
+                      borderClass = 'border-l-2 border-red-600 bg-red-900/10';
+                      bgHoverClass = 'hover:bg-red-900/20';
+                      badgeClass = 'bg-red-950 text-red-400 border-red-900';
+                      // Icon Cảnh báo (Tam giác ! )
+                      Icon = (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                      );
+                  } else if (isSubmit) {
+                      borderClass = 'border-l-2 border-blue-500 bg-blue-900/10';
+                      badgeClass = 'bg-blue-950 text-blue-400 border-blue-900';
+                      // Icon Nộp bài (Check)
+                      Icon = (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      );
+                  } else if (isJoin) {
+                      badgeClass = 'bg-green-950 text-green-400 border-green-900';
+                      // Icon Join (Mũi tên vào)
+                      Icon = (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                        </svg>
+                      );
+                  } else {
+                      // Icon Info (Chữ i)
+                      Icon = (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      );
+                  }
+
+                  return (
+                      <div key={log.id} className={`p-3 border-b border-gray-800/50 transition-all ${borderClass} ${bgHoverClass} group`}>
+                         
+                         {/* Dòng 1: Thời gian & IP */}
+                         <div className="flex justify-between items-center mb-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
+                            <span className="text-[10px] text-gray-500 flex items-center gap-1.5">
+                               {/* Icon Đồng hồ */}
+                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                               </svg>
+                               {new Date(log.createdAt).toLocaleString('vi-VN', {
+                                  day: '2-digit', month: '2-digit', 
+                                  hour: '2-digit', minute: '2-digit', second: '2-digit'
+                               })}
+                            </span>
+                            <span className="text-[10px] text-blue-500/80 font-mono flex items-center gap-1">
+                               {/* Icon Network/Globe */}
+                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                               </svg>
+                               {log.clientIp}
+                            </span>
+                         </div>
+
+                         {/* Dòng 2: User & Action Badge */}
+                         <div className="flex items-center gap-2 mb-1">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border uppercase tracking-wider flex items-center gap-1 ${badgeClass}`}>
+                               {Icon}
+                               {log.action}
+                            </span>
+                            <span className={`font-bold text-sm ${isViolation ? 'text-red-200' : 'text-gray-300'}`}>
+                               {log.user?.username || 'Unknown'}
+                            </span>
+                         </div>
+
+                         {/* Dòng 3: Details */}
+                         {log.details && (
+                            <div className="text-gray-500 text-[11px] pl-2 ml-1 border-l border-gray-700 leading-tight flex gap-1.5 pt-0.5">
+                               {/* Icon Arrow Turn Right */}
+                               <svg className="w-3 h-3 shrink-0 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" transform="scale(-1, 1) translate(-24, 0)" /> 
+                                  {/* Hack transform để quay mũi tên */}
+                               </svg>
+                               {log.details}
+                            </div>
+                         )}
+                      </div>
+                  );
+               })}
+
+               {/* Empty State */}
+               {logs.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-40 text-gray-700 space-y-3 mt-10">
+                     {/* Icon Radar Scan */}
+                     <svg className="w-12 h-12 animate-pulse text-gray-800" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                     </svg>
+                     <div className="text-xs italic font-mono">System listening for events...</div>
                   </div>
-               ))}
-               {logs.length === 0 && <div className="text-slate-600 text-center italic mt-10">Waiting for events...</div>}
+               )}
+               
+               <div className="h-4"></div>
             </div>
-         </div>
+        </div>
 
       </div>
     </div>

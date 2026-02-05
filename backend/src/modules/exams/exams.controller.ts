@@ -45,22 +45,26 @@ export class ExamsController {
   }
 
   // --- API NỘP BÀI & THU HỒI MÁY ---
-  @Post(':examId/submit')
-  @UseGuards(JwtAuthGuard) // Yêu cầu token đăng nhập
-  async submitExam(@Req() req, @Param('examId') examId: string) {
-    // Lấy userId từ token (req.user do JwtStrategy giải mã)
-    const userId = req.user.id; // Hoặc req.user.userId tuỳ cấu hình JWT
+  @Post(':id/finish')
+  @UseGuards(JwtAuthGuard) // Bắt buộc phải có Token đăng nhập
+  async finishExam(@Req() req, @Param('id') examId: string) {
+    const userId = req.user.id; 
 
-    console.log(`[SUBMIT] User ${userId} submitting exam ${examId}`);
+    console.log(`[FINISH] User ${userId} finished exam ${examId}`);
 
-    // 1. Ghi nhận nộp bài (Sửa this.examService -> this.examsService)
-    // Cần đảm bảo ExamsService có hàm recordSubmission
-    // await this.examsService.recordSubmission(userId, +examId); 
+    // 1. Logic lưu kết quả thi (nếu cần)
+    // await this.examsService.submitExamResult(userId, +examId);
 
     // 2. THU HỒI MÁY ẢO NGAY LẬP TỨC
     await this.vdiService.revokeVmConnection(userId);
 
-    return { message: 'Bài thi đã được nộp thành công, máy ảo đang thu hồi.' };
+    return { message: 'Đã nộp bài và thu hồi máy ảo thành công.' };
+  }
+
+  @Post(':id/submit')
+  @UseGuards(JwtAuthGuard)
+  async submitExam(@Req() req, @Param('id') examId: string) {
+      return this.finishExam(req, examId); // Gọi chung logic
   }
 
   @Patch(':id')
