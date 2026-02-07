@@ -476,7 +476,7 @@ export default function ExamInterface({ studentInfo, token, examId, userId }: Ex
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                       Bạn nuốn nộp bài?
                    </p>
-                   Vui lòng bấm <strong>"Quay lại làm bài"</strong>, sau đó nhấn nút <strong>NỘP BÀI</strong> màu đỏ ở góc trên bên phải màn hình.
+                    Nhấn nút <strong>NỘP BÀI</strong> màu đỏ ở góc trên bên phải màn hình để nộp bài.
                 </div>
               </div>
               

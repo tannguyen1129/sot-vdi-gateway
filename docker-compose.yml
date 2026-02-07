@@ -1,92 +1,119 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  
+  # 1) Nginx Gateway (HTTP + HTTPS)
   nginx:
     image: nginx:alpine
     container_name: umt_nginx
     restart: always
     ports:
-      - "80:80" # Chạy chính ở cổng 80
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - "80:80"
+      - "443:443"
     depends_on:
-      - frontend
       - backend
+      - frontend
+    sysctls:
+      - net.core.somaxconn=65535
+    volumes:
+      # Nginx config của bạn
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+      # Webroot cho ACME challenge
+      - ./certbot/www:/var/www/certbot:ro
+
+      # Nơi chứa chứng chỉ Let's Encrypt
+      - ./certbot/conf:/etc/letsencrypt:ro
     networks:
       - vdi_net
 
-  guacd:
-    #image: guacamole/guacd
-    build: ./guacd-custom
-    environment:
-      - LOG_LEVEL=info
-    container_name: umt_guacd
+  # 2) Certbot (auto renew)
+  # - Renew mỗi 12h
+  # - Chứng chỉ và webroot dùng chung với nginx qua volume host
+  certbot:
+    image: certbot/certbot:latest
+    container_name: umt_certbot
     restart: always
-    env_file:
-      - .env
-    expose:
-      - "4822"
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: /bin/sh -c
+    command: >
+      "trap exit TERM;
+       while :; do
+         certbot renew;
+         sleep 12h & wait $${!};
+       done"
     networks:
       - vdi_net
-    # [THÊM DÒNG NÀY] Tối ưu Java Heap và Buffer cho guacd
+
+  # 3) Guacd Service
+  guacd:
+    build: ./guacd-custom
+    container_name: umt_guacd
+    restart: always
+    expose:
+      - "4822"
     deploy:
       resources:
         limits:
-          memory: 2G  # Cấp hẳn 1GB Ram cho nó xử lý ảnh
+          memory: 32G
+    networks:
+      - vdi_net
 
-  # 2. Database (PostgreSQL)
+  # 4) Database
   postgres:
     image: postgres:15-alpine
     container_name: umt_db
     restart: always
-    env_file:
-      - .env
+    env_file: .env
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
+    command: >
+      postgres
+      -c shared_buffers=48GB
+      -c effective_cache_size=128GB
+      -c work_mem=64MB
+      -c max_connections=1000
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
     networks:
       - vdi_net
 
-  # 3. Backend API
+  # 5) Backend API
   backend:
     build: ./backend
-    container_name: umt_backend
     restart: always
-    env_file:
-      - .env
-    #ports:
-    #  - "3000:3000"
+    env_file: .env
+    environment:
+      - DB_HOST=umt_db
+      - GUACD_HOST=guacd
+      - GUACD_PORT=4822
     depends_on:
       - postgres
       - guacd
+    deploy:
+      replicas: 10
+      resources:
+        limits:
+          memory: 4G
     networks:
       - vdi_net
 
-  # 4. Frontend Client
+  # 6) Frontend Next.js
   frontend:
     build: ./frontend
     container_name: umt_frontend
     restart: always
-    env_file:
-      - .env
-    #ports:
-    #  - "80:3000"
+    env_file: .env
     depends_on:
       - backend
     networks:
       - vdi_net
 
-# --- CẤU HÌNH MẠNG (FIX LỖI DISCONNECT) ---
 networks:
   vdi_net:
     driver: bridge
     driver_opts:
-      # Quan trọng: Giảm MTU xuống 1350 để gói tin RDP lớn
-      # không bị Docker drop (nguyên nhân gây màn hình đen/disconnect)
       com.docker.network.driver.mtu: "1350"

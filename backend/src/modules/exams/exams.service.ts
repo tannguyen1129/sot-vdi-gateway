@@ -56,7 +56,9 @@ export class ExamsService {
     const entryTime = new Date(new Date(exam.startTime).getTime() - 15 * 60000); // Vào sớm 15p
 
     if (now < entryTime) {
-       throw new BadRequestException(`Chưa đến giờ thi! Mở cửa lúc: ${new Date(exam.startTime).toLocaleTimeString()}`);
+       throw new BadRequestException(
+        `Chưa đến giờ thi! Mở cửa lúc: ${new Date(exam.startTime).toLocaleTimeString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' })}`
+      );
     }
     if (now > new Date(exam.endTime)) {
        throw new BadRequestException('Kỳ thi đã kết thúc!');
